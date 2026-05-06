@@ -1,0 +1,891 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PetClinic__c — Salesforce Docs</title>
+<script>if(localStorage.getItem('sf-docs-theme')==='dark')document.documentElement.setAttribute('data-theme','dark');</script>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg:#f4f6f9; --surface:#fff; --surface2:#f3f4f6;
+    --border:#e0e0e0; --border-light:#f0f0f0;
+    --text:#1a1a2e; --text-muted:#5a6474; --text-dim:#555;
+    --accent:#0070d2; --hover-bg:#fafbff; --input-bg:#fff;
+    --code-bg:#f0f4ff; --code-color:#3451b2; --code-hover:#dde8ff;
+    --sec-bg:#e8f0fe; --sec-color:#1a56db; --sec-border:#c7d7fc;
+    --fborder:#f5c800; --fhdr-bg:#fef9c3; --fhdr-color:#78500a;
+    --fbody-bg:#fffdf0; --fcode-sep:#f5d000;
+    --fbtn-bg:#fffbe6; --fbtn-color:#b07a00; --fbtn-border:#f5d000;
+    --fbtn-hover:#fff3b0; --fbtn-open-bg:#f5d000; --fbtn-open-color:#5a3e00;
+  }
+  [data-theme="dark"] {
+    --bg:#0d1117; --surface:#161b22; --surface2:#21262d;
+    --border:#30363d; --border-light:#21262d;
+    --text:#e6edf3; --text-muted:#8b949e; --text-dim:#8b949e;
+    --accent:#58a6ff; --hover-bg:#1c2128; --input-bg:#21262d;
+    --code-bg:#2d333b; --code-color:#79c0ff; --code-hover:#373e47;
+    --sec-bg:#1c2d3e; --sec-color:#79c0ff; --sec-border:#1f3d5c;
+    --fborder:#b08800; --fhdr-bg:#2d2200; --fhdr-color:#e6b800;
+    --fbody-bg:#1e1a00; --fcode-sep:#8a6a00;
+    --fbtn-bg:#2d2200; --fbtn-color:#e6b800; --fbtn-border:#8a6a00;
+    --fbtn-hover:#3d3000; --fbtn-open-bg:#8a6a00; --fbtn-open-color:#ffe066;
+  }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    font-size: 13px;
+    background: var(--bg);
+    color: var(--text);
+    padding: 24px;
+  }
+
+  .container { max-width: 1500px; margin: 0 auto; }
+
+  a.back { display: inline-block; margin-bottom: 12px; color: #0070d2; text-decoration: none; font-size: 13px; }
+  a.back:hover { text-decoration: underline; }
+
+  header {
+    background: linear-gradient(135deg, #0070d2 0%, #1589ee 100%);
+    color: #fff;
+    padding: 24px 32px;
+    border-radius: 8px 8px 0 0;
+  }
+
+  header h1 { font-size: 26px; font-weight: 700; letter-spacing: -0.5px; margin-bottom: 12px; }
+  header h1 span { font-size: 14px; font-weight: 400; opacity: 0.75; margin-left: 10px; }
+
+  .meta { display: flex; flex-wrap: wrap; gap: 18px; font-size: 13px; opacity: 0.9; }
+  .badge { background: rgba(255,255,255,0.2); padding: 2px 9px; border-radius: 12px; font-weight: 600; }
+
+  .toolbar {
+    background: var(--surface);
+    padding: 12px 16px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+    border-bottom: 1px solid var(--border);
+    border-left: 1px solid var(--border);
+    border-right: 1px solid var(--border);
+  }
+  .dm-toggle {
+    margin-left: 8px; padding: 5px 10px;
+    border: 1px solid var(--border); border-radius: 6px;
+    background: var(--surface); color: var(--text);
+    cursor: pointer; font-size: 14px; line-height: 1;
+    transition: background 0.15s;
+  }
+  .dm-toggle:hover { background: var(--hover-bg); }
+
+  .search-wrap { position: relative; flex: 1; min-width: 200px; max-width: 380px; }
+  .search-wrap input {
+    width: 100%;
+    padding: 7px 12px 7px 32px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    font-size: 13px;
+    background: var(--input-bg);
+    color: var(--text);
+    outline: none;
+    transition: border-color 0.15s;
+  }
+  .search-wrap input:focus { border-color: var(--accent); }
+  .search-wrap::before {
+    content: '🔍';
+    position: absolute;
+    left: 9px;
+    top: 50%;
+    transform: translateY(-50%);
+    font-size: 12px;
+    pointer-events: none;
+  }
+
+  .filter-group { display: flex; gap: 6px; flex-wrap: wrap; }
+
+  .filter-btn {
+    padding: 5px 12px;
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    background: var(--surface);
+    color: var(--text);
+    font-size: 12px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.15s;
+    white-space: nowrap;
+  }
+  .filter-btn:hover { border-color: var(--accent); color: var(--accent); }
+  .filter-btn.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+
+  .count-label { margin-left: auto; font-size: 12px; color: var(--text-muted); white-space: nowrap; }
+  .count-label strong { color: var(--text); }
+
+  table.main-table {
+    width: 100%;
+    border-collapse: collapse;
+    background: var(--surface);
+    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+  }
+
+  table.main-table thead th {
+    background: var(--surface2);
+    padding: 10px 14px;
+    text-align: left;
+    font-weight: 600;
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--text-muted);
+    border-bottom: 2px solid var(--border);
+    position: sticky;
+    top: 0;
+    z-index: 10;
+  }
+
+  tr.section-header td {
+    background: var(--sec-bg);
+    color: var(--sec-color);
+    font-weight: 700;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    padding: 7px 14px;
+    border-top: 2px solid var(--sec-border);
+    border-bottom: 1px solid var(--sec-border);
+  }
+
+  tr.field-row td {
+    padding: 9px 14px;
+    border-bottom: 1px solid var(--border-light);
+    vertical-align: top;
+  }
+
+  tr.field-row:hover td { background: var(--hover-bg); }
+
+  code.api-name {
+    font-family: 'SF Mono', 'Fira Code', Consolas, monospace;
+    font-size: 12px;
+    background: var(--code-bg);
+    color: var(--code-color);
+    padding: 2px 6px;
+    border-radius: 4px;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  code.api-name:hover { background: var(--code-hover); }
+  code.api-name.copied { background: #d4edda; color: #155724; }
+
+  .type-cell { max-width: 155px; }
+
+  .type-badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: 600;
+    white-space: nowrap;
+    background: #f0f4f8;
+    color: #4a5568;
+  }
+  .type-picklist { background: #e6f7ff; color: #0070d2; }
+  .type-multipicklist { background: #e6f7ff; color: #0070d2; }
+  .type-reference { background: #fff0e6; color: #b35a00; }
+  .type-boolean { background: #e6ffe6; color: #1a7a1a; }
+  .type-datetime, .type-date { background: #f5e6ff; color: #7a00b3; }
+  .type-string, .type-textarea { background: #f0f4f8; color: #4a5568; }
+  .type-double, .type-int, .type-currency, .type-percent { background: #e6fff0; color: #007a4d; }
+  .type-id, .type-autonumber { background: #f0f0f0; color: #666; }
+  .type-calculated { background: #fffbe6; color: #b07a00; }
+
+  .req-badge {
+    display: inline-block;
+    margin-left: 5px;
+    padding: 1px 5px;
+    background: #fff0f0;
+    color: #c00;
+    border: 1px solid #fcc;
+    border-radius: 3px;
+    font-size: 10px;
+    font-weight: 700;
+    vertical-align: middle;
+  }
+
+  .formula-toggle-btn {
+    margin-top: 5px;
+    padding: 2px 8px;
+    font-size: 11px;
+    color: var(--fbtn-color);
+    background: var(--fbtn-bg);
+    border: 1px solid var(--fbtn-border);
+    border-radius: 4px;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  .formula-toggle-btn:hover { background: var(--fbtn-hover); }
+  .formula-toggle-btn.open { background: var(--fbtn-open-bg); color: var(--fbtn-open-color); }
+
+  .formula-expand-row td { padding: 0; border-bottom: 2px solid var(--fborder); }
+  .frow-header {
+    padding: 8px 16px;
+    background: var(--fhdr-bg);
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--fhdr-color);
+    border-bottom: 1px solid var(--fcode-sep);
+  }
+  .frow-body {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+  }
+  .frow-code {
+    padding: 14px 16px;
+    border-right: 1px solid var(--fcode-sep);
+    background: var(--fbody-bg);
+  }
+  .frow-code pre {
+    font-family: 'SF Mono', 'Fira Code', Consolas, monospace;
+    font-size: 12px;
+    white-space: pre-wrap;
+    word-break: break-all;
+    color: var(--text);
+    margin: 0;
+  }
+  .frow-expl {
+    padding: 14px 16px;
+    background: var(--fbody-bg);
+  }
+  .frow-expl-label {
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--fhdr-color);
+    margin-bottom: 8px;
+  }
+  .frow-expl p {
+    font-size: 13px;
+    color: var(--text-dim);
+    line-height: 1.6;
+  }
+
+  .desc { color: var(--text-dim); font-style: italic; min-width: 280px; max-width: 380px; }
+
+  ul.picklist-values { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 3px; }
+  ul.picklist-values li { display: flex; align-items: baseline; gap: 6px; font-size: 12px; line-height: 1.4; }
+  ul.picklist-values .arrow { color: var(--text-muted); font-size: 11px; flex-shrink: 0; }
+  ul.picklist-values code { font-size: 11px; }
+
+  em.empty { color: var(--text-muted); font-size: 12px; }
+
+  .section-block {
+    margin-top: 32px;
+    background: var(--surface);
+    border-radius: 8px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+    overflow: hidden;
+  }
+
+  .section-title {
+    background: linear-gradient(135deg, #0070d2 0%, #1589ee 100%);
+    color: #fff;
+    padding: 14px 20px;
+    font-size: 15px;
+    font-weight: 700;
+  }
+
+  .section-title span { font-size: 12px; font-weight: 400; opacity: 0.75; margin-left: 8px; }
+
+  table.secondary-table {
+    width: 100%;
+    border-collapse: collapse;
+  }
+
+  table.secondary-table thead th {
+    background: var(--surface2);
+    padding: 9px 14px;
+    text-align: left;
+    font-size: 12px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+    color: var(--text-muted);
+    border-bottom: 1px solid var(--border);
+  }
+
+  table.secondary-table tbody tr { border-bottom: 1px solid var(--border-light); }
+  table.secondary-table tbody tr:hover td { background: var(--hover-bg); }
+  table.secondary-table td { padding: 9px 14px; vertical-align: top; font-size: 13px; }
+
+  .active-badge {
+    display: inline-block; padding: 2px 8px; border-radius: 12px;
+    background: #d4edda; color: #155724; font-size: 11px; font-weight: 600;
+  }
+  .inactive-badge {
+    display: inline-block; padding: 2px 8px; border-radius: 12px;
+    background: #f8d7da; color: #721c24; font-size: 11px; font-weight: 600;
+  }
+
+  .empty-section { padding: 16px 20px; color: #888; font-style: italic; }
+
+  .trigger-block { border-bottom: 1px solid var(--border); padding: 14px 20px; }
+  .trigger-block:last-child { border-bottom: none; }
+  .trigger-header { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 8px; }
+  .trigger-name {
+    font-family: 'SF Mono', 'Fira Code', Consolas, monospace;
+    font-size: 13px; background: var(--code-bg); color: var(--code-color);
+    padding: 2px 8px; border-radius: 4px;
+  }
+  .trigger-events { font-size: 12px; color: var(--text-muted); }
+  .trigger-handler { font-size: 12px; color: var(--text-muted); }
+  .trigger-handler code {
+    font-family: 'SF Mono', 'Fira Code', Consolas, monospace;
+    font-size: 12px; color: var(--code-color);
+  }
+  .trigger-note { font-size: 12px; color: var(--text-muted); font-style: italic; margin: 2px 0 10px; }
+  .trigger-ctx { font-size: 12px; font-weight: 600; color: var(--sec-color); background: var(--sec-bg); white-space: nowrap; }
+</style>
+</head>
+<body>
+<div class="container">
+  <a class="back" href="index.html">← Volver al índice</a>
+
+  <header>
+    <h1>PetClinic__c <span>Salesforce Object</span></h1>
+    <div class="meta">
+      <div>Total <strong class="badge">18</strong></div>
+      <div>Estándar <strong class="badge">4</strong></div>
+      <div>Custom <strong class="badge">14</strong></div>
+      <div>Picklists <strong class="badge">4</strong></div>
+      <div>Fórmulas <strong class="badge">4</strong></div>
+      <div>Requeridos <strong class="badge">3</strong></div>
+      <div>Org: <strong>my-sandbox</strong></div>
+      <div>Generado: <strong>2026-05-06 10:42</strong></div>
+    </div>
+  </header>
+
+  <div class="toolbar">
+    <div class="search-wrap">
+      <input type="text" id="search" placeholder="Buscar campo…" autocomplete="off">
+    </div>
+    <div class="filter-group">
+      <button class="filter-btn active" data-filter="all">Todos</button>
+      <button class="filter-btn" data-filter="standard">Estándar</button>
+      <button class="filter-btn" data-filter="custom">Custom</button>
+      <button class="filter-btn" data-filter="picklist">Picklist</button>
+      <button class="filter-btn" data-filter="formula">Fórmula</button>
+      <button class="filter-btn" data-filter="required">Requerido</button>
+    </div>
+    <span class="count-label">Mostrando <strong id="visible-count">18</strong> de 18</span>
+    <button id="dm-toggle" class="dm-toggle" title="Cambiar tema">🌙</button>
+  </div>
+
+  <table class="main-table">
+    <thead>
+      <tr>
+        <th style="width:200px">API Name</th>
+        <th style="width:170px">Label</th>
+        <th style="width:170px">Tipo</th>
+        <th style="min-width:300px">Descripción</th>
+        <th>Valores Picklist (API → Label)</th>
+      </tr>
+    </thead>
+    <tbody id="fields-tbody">
+
+<!-- Standard fields -->
+<tr class="section-header"><td colspan="5">— Campos estándar —</td></tr>
+
+<tr class="field-row" data-tags="standard required">
+  <td><code class="api-name" title="Copiar">Name</code></td>
+  <td>Clinic Name</td>
+  <td class="type-cell"><span class="type-badge type-string">Text(80)</span><span class="req-badge" title="Campo requerido">Req</span></td>
+  <td class="desc">Name of the veterinary clinic or pet store.</td>
+  <td></td>
+</tr>
+
+<tr class="field-row" data-tags="standard">
+  <td><code class="api-name" title="Copiar">CreatedDate</code></td>
+  <td>Created Date</td>
+  <td class="type-cell"><span class="type-badge type-datetime">Date/Time</span></td>
+  <td class="desc"></td>
+  <td></td>
+</tr>
+
+<tr class="field-row" data-tags="standard">
+  <td><code class="api-name" title="Copiar">Id</code></td>
+  <td>Record ID</td>
+  <td class="type-cell"><span class="type-badge type-id">ID</span></td>
+  <td class="desc"></td>
+  <td></td>
+</tr>
+
+<tr class="field-row" data-tags="standard">
+  <td><code class="api-name" title="Copiar">OwnerId</code></td>
+  <td>Owner</td>
+  <td class="type-cell"><span class="type-badge type-reference">Lookup(User)</span></td>
+  <td class="desc"></td>
+  <td></td>
+</tr>
+
+<!-- Custom fields -->
+<tr class="section-header"><td colspan="5">— Campos custom —</td></tr>
+
+<tr class="field-row" data-tags="custom required">
+  <td><code class="api-name" title="Copiar">Account__c</code></td>
+  <td>Account</td>
+  <td class="type-cell"><span class="type-badge type-reference">Lookup(Account)</span><span class="req-badge" title="Campo requerido">Req</span></td>
+  <td class="desc">Parent account this clinic belongs to.</td>
+  <td></td>
+</tr>
+
+<tr class="field-row" data-tags="custom">
+  <td><code class="api-name" title="Copiar">Annual_Revenue__c</code></td>
+  <td>Annual Revenue</td>
+  <td class="type-cell"><span class="type-badge type-currency">Currency(18, 2)</span></td>
+  <td class="desc">Estimated annual revenue generated through product purchases.</td>
+  <td></td>
+</tr>
+
+<tr class="field-row" data-tags="custom picklist">
+  <td><code class="api-name" title="Copiar">Brand__c</code></td>
+  <td>Brand</td>
+  <td class="type-cell"><span class="type-badge type-picklist">Picklist</span></td>
+  <td class="desc">Primary product brand recommended by this clinic.</td>
+  <td>
+    <ul class="picklist-values">
+      <li><code>ADVANCE</code><span class="arrow">→</span>Advance</li>
+      <li><code>AVD</code><span class="arrow">→</span>Advance Vet Diets</li>
+      <li><code>AFFINITY</code><span class="arrow">→</span>Affinity</li>
+    </ul>
+  </td>
+</tr>
+
+<tr class="field-row" data-tags="custom required">
+  <td><code class="api-name" title="Copiar">Clinic_Code__c</code></td>
+  <td>Clinic Code</td>
+  <td class="type-cell"><span class="type-badge type-string">Text(20)</span><span class="req-badge" title="Campo requerido">Req</span></td>
+  <td class="desc">Unique internal identifier assigned during registration. Format: CL-XXXXXX.</td>
+  <td></td>
+</tr>
+
+<tr class="field-row" data-tags="custom picklist">
+  <td><code class="api-name" title="Copiar">Clinic_Type__c</code></td>
+  <td>Clinic Type</td>
+  <td class="type-cell"><span class="type-badge type-picklist">Picklist</span></td>
+  <td class="desc">Categorization of the clinic by its primary activity.</td>
+  <td>
+    <ul class="picklist-values">
+      <li><code>VET</code><span class="arrow">→</span>Veterinary</li>
+      <li><code>PET</code><span class="arrow">→</span>Pet Store</li>
+      <li><code>MIXED</code><span class="arrow">→</span>Mixed</li>
+    </ul>
+  </td>
+</tr>
+
+<tr class="field-row" data-tags="custom email">
+  <td><code class="api-name" title="Copiar">Contact_Email__c</code></td>
+  <td>Contact Email</td>
+  <td class="type-cell"><span class="type-badge type-string">Email</span></td>
+  <td class="desc">Main contact email address for commercial communication.</td>
+  <td></td>
+</tr>
+
+<tr class="field-row" data-tags="custom">
+  <td><code class="api-name" title="Copiar">Contact_Phone__c</code></td>
+  <td>Contact Phone</td>
+  <td class="type-cell"><span class="type-badge type-string">Phone</span></td>
+  <td class="desc">Main contact phone number.</td>
+  <td></td>
+</tr>
+
+<tr class="field-row" data-tags="custom">
+  <td><code class="api-name" title="Copiar">Contract_Start__c</code></td>
+  <td>Contract Start Date</td>
+  <td class="type-cell"><span class="type-badge type-date">Date</span></td>
+  <td class="desc">Date when the commercial agreement with this clinic became effective.</td>
+  <td></td>
+</tr>
+
+<tr class="field-row" data-tags="custom formula">
+  <td><code class="api-name" title="Copiar">Days_Since_Contract__c</code></td>
+  <td>Days Since Contract</td>
+  <td class="type-cell">
+    <span class="type-badge type-calculated">Formula(Number)</span>
+    <br><button class="formula-toggle-btn" data-row="frow-Days_Since_Contract__c">▶ ver fórmula</button>
+  </td>
+  <td class="desc">Number of days elapsed since the contract start date.</td>
+  <td></td>
+</tr>
+<tr class="formula-expand-row" id="frow-Days_Since_Contract__c" style="display:none">
+  <td colspan="5">
+    <div class="frow-header">📐 Days_Since_Contract__c</div>
+    <div class="frow-body">
+      <div class="frow-code"><pre>TODAY() - Contract_Start__c</pre></div>
+      <div class="frow-expl">
+        <div class="frow-expl-label">💡 Qué hace</div>
+        <p>Calcula cuántos días han transcurrido desde la fecha de inicio del contrato hasta hoy restando Contract_Start__c de TODAY(). Permite identificar rápidamente la antigüedad del acuerdo comercial y filtrar clínicas por madurez de relación.</p>
+      </div>
+    </div>
+  </td>
+</tr>
+
+<tr class="field-row" data-tags="custom formula">
+  <td><code class="api-name" title="Copiar">Full_Contact_Info__c</code></td>
+  <td>Full Contact Info</td>
+  <td class="type-cell">
+    <span class="type-badge type-calculated">Formula(Text)</span>
+    <br><button class="formula-toggle-btn" data-row="frow-Full_Contact_Info__c">▶ ver fórmula</button>
+  </td>
+  <td class="desc">Concatenation of email and phone for quick display in list views.</td>
+  <td></td>
+</tr>
+<tr class="formula-expand-row" id="frow-Full_Contact_Info__c" style="display:none">
+  <td colspan="5">
+    <div class="frow-header">📐 Full_Contact_Info__c</div>
+    <div class="frow-body">
+      <div class="frow-code"><pre>IF(NOT(ISBLANK(Contact_Email__c)) &amp;&amp; NOT(ISBLANK(Contact_Phone__c)),
+  Contact_Email__c &amp; " | " &amp; Contact_Phone__c,
+  IF(NOT(ISBLANK(Contact_Email__c)), Contact_Email__c, Contact_Phone__c)
+)</pre></div>
+      <div class="frow-expl">
+        <div class="frow-expl-label">💡 Qué hace</div>
+        <p>Combina el email y el teléfono de contacto en un único campo de texto separados por " | ". Si solo uno de los dos está informado, devuelve únicamente ese valor sin el separador. Facilita la visualización de datos de contacto en vistas de lista sin navegar al registro.</p>
+      </div>
+    </div>
+  </td>
+</tr>
+
+<tr class="field-row" data-tags="custom formula">
+  <td><code class="api-name" title="Copiar">Is_Active_Partner__c</code></td>
+  <td>Is Active Partner</td>
+  <td class="type-cell">
+    <span class="type-badge type-calculated">Formula(Checkbox)</span>
+    <br><button class="formula-toggle-btn" data-row="frow-Is_Active_Partner__c">▶ ver fórmula</button>
+  </td>
+  <td class="desc">TRUE if the clinic is both a partner and has Active status.</td>
+  <td></td>
+</tr>
+<tr class="formula-expand-row" id="frow-Is_Active_Partner__c" style="display:none">
+  <td colspan="5">
+    <div class="frow-header">📐 Is_Active_Partner__c</div>
+    <div class="frow-body">
+      <div class="frow-code"><pre>AND(
+  Is_Partner__c,
+  ISPICKVAL(Status__c, "Active")
+)</pre></div>
+      <div class="frow-expl">
+        <div class="frow-expl-label">💡 Qué hace</div>
+        <p>Devuelve TRUE únicamente cuando la clínica tiene el flag Is_Partner__c marcado y su estado es "Active" simultáneamente. Se usa en filtros de reportes y en reglas de asignación para distinguir partners activos de aquellos en estado provisional o inactivo.</p>
+      </div>
+    </div>
+  </td>
+</tr>
+
+<tr class="field-row" data-tags="custom">
+  <td><code class="api-name" title="Copiar">Is_Partner__c</code></td>
+  <td>Is Partner</td>
+  <td class="type-cell"><span class="type-badge type-boolean">Checkbox</span></td>
+  <td class="desc">Indicates whether this clinic has signed the partnership agreement.</td>
+  <td></td>
+</tr>
+
+<tr class="field-row" data-tags="custom">
+  <td><code class="api-name" title="Copiar">Notes__c</code></td>
+  <td>Notes</td>
+  <td class="type-cell"><span class="type-badge type-textarea">Long Text(32768)</span></td>
+  <td class="desc">Free-text field for internal comments and visit notes.</td>
+  <td></td>
+</tr>
+
+<tr class="field-row" data-tags="custom">
+  <td><code class="api-name" title="Copiar">Number_Of_Vets__c</code></td>
+  <td>Number of Vets</td>
+  <td class="type-cell"><span class="type-badge type-double">Number(3, 0)</span></td>
+  <td class="desc">Number of licensed veterinarians currently practicing at this clinic.</td>
+  <td></td>
+</tr>
+
+<tr class="field-row" data-tags="custom formula">
+  <td><code class="api-name" title="Copiar">Revenue_Per_Vet__c</code></td>
+  <td>Revenue Per Vet</td>
+  <td class="type-cell">
+    <span class="type-badge type-calculated">Formula(Currency)</span>
+    <br><button class="formula-toggle-btn" data-row="frow-Revenue_Per_Vet__c">▶ ver fórmula</button>
+  </td>
+  <td class="desc">Average annual revenue attributed to each veterinarian in the clinic.</td>
+  <td></td>
+</tr>
+<tr class="formula-expand-row" id="frow-Revenue_Per_Vet__c" style="display:none">
+  <td colspan="5">
+    <div class="frow-header">📐 Revenue_Per_Vet__c</div>
+    <div class="frow-body">
+      <div class="frow-code"><pre>IF(
+  Number_Of_Vets__c > 0,
+  Annual_Revenue__c / Number_Of_Vets__c,
+  0
+)</pre></div>
+      <div class="frow-expl">
+        <div class="frow-expl-label">💡 Qué hace</div>
+        <p>Divide el revenue anual entre el número de veterinarios para obtener el rendimiento medio por profesional. El IF evita la división por cero devolviendo 0 cuando Number_Of_Vets__c es nulo o cero. Útil para comparar la productividad económica entre clínicas de distinto tamaño.</p>
+      </div>
+    </div>
+  </td>
+</tr>
+
+<tr class="field-row" data-tags="custom picklist">
+  <td><code class="api-name" title="Copiar">Species_Focus__c</code></td>
+  <td>Species Focus</td>
+  <td class="type-cell"><span class="type-badge type-multipicklist">Multi-Picklist</span></td>
+  <td class="desc">Animal species the clinic specialises in. Multiple values allowed.</td>
+  <td>
+    <ul class="picklist-values">
+      <li><code>DOG</code><span class="arrow">→</span>Dogs</li>
+      <li><code>CAT</code><span class="arrow">→</span>Cats</li>
+      <li><code>BIRD</code><span class="arrow">→</span>Birds</li>
+      <li><code>EXOTIC</code><span class="arrow">→</span>Exotic Animals</li>
+    </ul>
+  </td>
+</tr>
+
+<tr class="field-row" data-tags="custom picklist">
+  <td><code class="api-name" title="Copiar">Status__c</code></td>
+  <td>Status</td>
+  <td class="type-cell"><span class="type-badge type-picklist">Picklist</span></td>
+  <td class="desc">Current commercial status of the clinic.</td>
+  <td>
+    <ul class="picklist-values">
+      <li><code>Active</code></li>
+      <li><code>Inactive</code></li>
+      <li><code>Pending</code><span class="arrow">→</span>Pending Activation</li>
+    </ul>
+  </td>
+</tr>
+
+    </tbody>
+  </table>
+
+  <!-- Validation Rules -->
+  <div class="section-block">
+    <div class="section-title">Reglas de validación <span>3 reglas</span></div>
+    <table class="secondary-table">
+      <thead><tr>
+        <th>Nombre</th><th>Estado</th><th>Descripción</th>
+        <th>Mensaje de error</th><th>Campo de error</th>
+      </tr></thead>
+      <tbody>
+        <tr>
+          <td><code>VR_RequireContractDate</code></td>
+          <td><span class="active-badge">Activa</span></td>
+          <td class="desc">Requires a contract start date whenever the clinic status is set to Active.</td>
+          <td>Contract Start Date is required for Active clinics.</td>
+          <td>Contract_Start__c</td>
+        </tr>
+        <tr>
+          <td><code>VR_RevenuePositive</code></td>
+          <td><span class="active-badge">Activa</span></td>
+          <td class="desc">Prevents saving a negative annual revenue value.</td>
+          <td>Annual Revenue cannot be a negative value.</td>
+          <td>Annual_Revenue__c</td>
+        </tr>
+        <tr>
+          <td><code>VR_EmailDomainAllowed</code></td>
+          <td><span class="inactive-badge">Inactiva</span></td>
+          <td class="desc">Validates that the contact email belongs to an approved domain list. Disabled pending domain whitelist review.</td>
+          <td>The email domain is not authorised. Please use an approved domain.</td>
+          <td>Contact_Email__c</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- Record-Triggered Flows -->
+  <div class="section-block">
+    <div class="section-title">Record-Triggered Flows <span>2 flows</span></div>
+    <table class="secondary-table">
+      <thead><tr>
+        <th>API Name</th><th>Label</th><th>Estado</th><th>Trigger</th><th>Descripción</th>
+      </tr></thead>
+      <tbody>
+        <tr>
+          <td><code>PetClinic_AssignOwner_BS</code></td>
+          <td>Assign Owner by Region</td>
+          <td><span class="active-badge">Activo</span></td>
+          <td>Before Save</td>
+          <td class="desc">Assigns the RDC owner based on the clinic postal code at creation time.</td>
+        </tr>
+        <tr>
+          <td><code>PetClinic_NotifyAccount_AS</code></td>
+          <td>Notify Account on Activation</td>
+          <td><span class="active-badge">Activo</span></td>
+          <td>After Save</td>
+          <td class="desc">Sends a Chatter notification to the parent account when the clinic status changes to Active.</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- Apex Triggers -->
+  <div class="section-block">
+    <div class="section-title">Apex Triggers <span>2 triggers</span></div>
+
+    <div class="trigger-block">
+      <div class="trigger-header">
+        <code class="trigger-name">PetClinicTrigger</code>
+        <span class="active-badge">Activo</span>
+        <span class="trigger-events">Before Insert, Before Update, After Insert, After Update</span>
+        <span class="trigger-handler">→ <code>PetClinicTriggerDispatcher → 4 handlers</code></span>
+      </div>
+      <table class="secondary-table">
+        <thead><tr><th>Contexto</th><th>Método / Acción</th><th>Descripción</th></tr></thead>
+        <tbody>
+          <tr>
+            <td class="trigger-ctx">Before Insert</td>
+            <td><code>validateClinicCode</code></td>
+            <td class="desc">Valida que el código de clínica tenga el formato correcto (CL-XXXXXX) antes de guardar el registro.</td>
+          </tr>
+          <tr>
+            <td class="trigger-ctx">Before Insert</td>
+            <td><code>setDefaultBrand</code></td>
+            <td class="desc">Asigna la marca por defecto según la región geográfica de la clínica si no se ha informado ninguna.</td>
+          </tr>
+          <tr>
+            <td class="trigger-ctx">Before Insert</td>
+            <td><code>checkDuplicateClinic</code></td>
+            <td class="desc">Impide crear clínicas duplicadas verificando que no exista ya un registro con el mismo código o combinación de nombre y cuenta padre.</td>
+          </tr>
+          <tr>
+            <td class="trigger-ctx">Before Update</td>
+            <td><code>validateStatusTransition</code></td>
+            <td class="desc">Valida que la transición de estado solicitada sea permitida (ej. no se puede pasar de Inactive a Pending sin aprobación).</td>
+          </tr>
+          <tr>
+            <td class="trigger-ctx">Before Update</td>
+            <td><code>syncWithSAPPrep</code></td>
+            <td class="desc">Prepara los campos de integración SAP marcando el registro para sincronización cuando cambian datos maestros relevantes.</td>
+          </tr>
+          <tr>
+            <td class="trigger-ctx">After Insert</td>
+            <td><code>createInitialVisitRoute</code></td>
+            <td class="desc">Genera automáticamente el plan de visitas inicial para la nueva clínica según su tipo y zona geográfica.</td>
+          </tr>
+          <tr>
+            <td class="trigger-ctx">After Insert</td>
+            <td><code>notifyRDC</code></td>
+            <td class="desc">Envía una notificación al RDC asignado informando de la nueva clínica creada en su territorio.</td>
+          </tr>
+          <tr>
+            <td class="trigger-ctx">After Insert</td>
+            <td><code>sendWelcomeEmail</code></td>
+            <td class="desc">Dispara el envío del email de bienvenida al contacto principal de la clínica si el estado inicial es Active.</td>
+          </tr>
+          <tr>
+            <td class="trigger-ctx">After Update</td>
+            <td><code>updateParentAccountStats</code></td>
+            <td class="desc">Recalcula los campos de resumen de la cuenta padre (número de clínicas activas, revenue total) cuando cambia el estado o el revenue de la clínica.</td>
+          </tr>
+          <tr>
+            <td class="trigger-ctx">After Update</td>
+            <td><code>checkGeolocation</code></td>
+            <td class="desc">Actualiza las coordenadas geográficas de la clínica llamando al servicio de geocodificación cuando cambia la dirección.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="trigger-block">
+      <div class="trigger-header">
+        <code class="trigger-name">LEGACY_PetClinicTrigger</code>
+        <span class="inactive-badge">Desactivado</span>
+        <span class="trigger-events">Before Insert, Before Update, After Insert</span>
+      </div>
+      <p class="trigger-note">Desactivado en 2023. La lógica fue migrada a PetClinicTrigger con el patrón TriggerFactory y clases handler separadas por contexto.</p>
+      <p class="trigger-note" style="margin:4px 16px 14px">Toda la lógica del trigger está comentada en el código fuente.</p>
+    </div>
+
+  </div>
+
+</div>
+
+<script>
+(function() {
+  const searchInput = document.getElementById('search');
+  const filterBtns = document.querySelectorAll('.filter-btn');
+  const rows = document.querySelectorAll('.field-row');
+  const visibleCount = document.getElementById('visible-count');
+  let activeFilter = 'all';
+
+  function applyFilters() {
+    const q = searchInput.value.toLowerCase().trim();
+    let count = 0;
+    rows.forEach(row => {
+      const text = row.textContent.toLowerCase();
+      const tags = row.dataset.tags || '';
+      const matchesSearch = !q || text.includes(q);
+      const matchesFilter = activeFilter === 'all' || tags.split(' ').includes(activeFilter);
+      const visible = matchesSearch && matchesFilter;
+      row.style.display = visible ? '' : 'none';
+      if (visible) count++;
+    });
+    document.querySelectorAll('tr.section-header').forEach(header => {
+      let next = header.nextElementSibling;
+      let hasVisible = false;
+      while (next && !next.classList.contains('section-header')) {
+        if (next.style.display !== 'none') { hasVisible = true; break; }
+        next = next.nextElementSibling;
+      }
+      header.style.display = hasVisible ? '' : 'none';
+    });
+    visibleCount.textContent = count;
+  }
+
+  searchInput.addEventListener('input', applyFilters);
+
+  filterBtns.forEach(btn => {
+    btn.addEventListener('click', () => {
+      filterBtns.forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      activeFilter = btn.dataset.filter;
+      applyFilters();
+    });
+  });
+
+  document.querySelectorAll('code.api-name').forEach(el => {
+    el.addEventListener('click', () => {
+      navigator.clipboard.writeText(el.textContent).then(() => {
+        el.classList.add('copied');
+        setTimeout(() => el.classList.remove('copied'), 1200);
+      });
+    });
+  });
+
+  document.querySelectorAll('.formula-toggle-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const row = document.getElementById(btn.dataset.row);
+      if (!row) return;
+      const open = row.style.display !== 'none';
+      row.style.display = open ? 'none' : '';
+      btn.textContent = open ? '▶ ver fórmula' : '▼ ocultar fórmula';
+      btn.classList.toggle('open', !open);
+    });
+  });
+
+  const dmToggle = document.getElementById('dm-toggle');
+  const root = document.documentElement;
+  if (root.getAttribute('data-theme') === 'dark') dmToggle.textContent = '☀️';
+  dmToggle.addEventListener('click', () => {
+    const isDark = root.getAttribute('data-theme') === 'dark';
+    if (isDark) {
+      root.removeAttribute('data-theme');
+      dmToggle.textContent = '🌙';
+      localStorage.setItem('sf-docs-theme', 'light');
+    } else {
+      root.setAttribute('data-theme', 'dark');
+      dmToggle.textContent = '☀️';
+      localStorage.setItem('sf-docs-theme', 'dark');
+    }
+  });
+})();
+</script>
+</body>
+</html>
