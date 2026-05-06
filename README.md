@@ -1,42 +1,42 @@
 # documentar-objeto
 
-A Claude Code skill that generates rich HTML documentation for any Salesforce object — fields, picklist values, formula explanations, validation rules, record-triggered flows and Apex triggers — with a single command.
+Skill para Claude Code que genera documentación HTML interactiva de cualquier objeto Salesforce — campos, valores picklist, explicaciones de fórmulas, reglas de validación, flows y triggers Apex — con un único comando.
 
-## Features
+## Características
 
-- **Complete field catalog** — standard and custom, with type badges, required markers and picklist values (`API value → Label`)
-- **Formula explanations** — expandable panel per formula field showing the code and an AI-generated explanation in Spanish
-- **Validation rules** — name, status, description and error message
-- **Record-Triggered Flows** — trigger type, active/inactive status and description
-- **Apex Triggers** — detects TriggerFactory and direct handler patterns; lists every method per context (Before Insert, After Update, etc.)
-- **Dark mode** — toggle button, persisted via `localStorage`
-- **Search & filters** — real-time search by API name or label; filter buttons by type (standard, custom, picklist, formula, required)
-- **Formula cache** — explanations are cached per field+formula; only regenerated when the formula changes
-- **Index page** — `index.html` updated automatically after each run with object stats
+- **Catálogo completo de campos** — estándar y custom, con badges de tipo, marcadores de campo requerido y valores picklist (`valor API → Label`)
+- **Explicaciones de fórmulas** — panel expandible por campo fórmula con el código y una explicación generada por IA
+- **Reglas de validación** — nombre, estado, descripción y mensaje de error
+- **Record-Triggered Flows** — tipo de trigger, estado activo/inactivo y descripción
+- **Apex Triggers** — detecta el patrón TriggerFactory y handlers directos; lista cada método por contexto (Before Insert, After Update, etc.)
+- **Modo oscuro** — botón de toggle persistido en `localStorage`
+- **Búsqueda y filtros** — búsqueda en tiempo real por API name o label; filtros por tipo (estándar, custom, picklist, fórmula, requerido)
+- **Caché de fórmulas** — las explicaciones se cachean por campo+fórmula; solo se regeneran cuando la fórmula cambia
+- **Página de índice** — `index.html` actualizado automáticamente tras cada ejecución con estadísticas del objeto
 
-## Prerequisites
+## Requisitos
 
-| Tool | Version |
-|------|---------|
+| Herramienta | Versión |
+|-------------|---------|
 | Python | 3.8 + |
 | Salesforce CLI (`sf`) | 2.x |
-| Claude Code | any |
+| Claude Code | cualquiera |
 
-The skill uses the [Anthropic SDK](https://pypi.org/project/anthropic/) to generate formula explanations. Install it once:
+El skill usa el [SDK de Anthropic](https://pypi.org/project/anthropic/) para generar las explicaciones de fórmulas. Instálalo una vez:
 
 ```bash
 pip install anthropic
 ```
 
-The CLI must be authenticated against the target org:
+El CLI debe estar autenticado contra la org de destino:
 
 ```bash
-sf org login web --alias my-sandbox
+sf org login web --alias mi-sandbox
 ```
 
-## Installation
+## Instalación
 
-Copy the skill folder into the Claude Code skills directory:
+Copia la carpeta del skill en el directorio de skills de Claude Code:
 
 ```bash
 # macOS / Linux
@@ -46,90 +46,90 @@ cp -r documentar-objeto ~/.claude/skills/
 Copy-Item -Recurse documentar-objeto "$env:USERPROFILE\.claude\skills\"
 ```
 
-Restart Claude Code (or reload the window) so the skill is picked up.
+Reinicia Claude Code (o recarga la ventana) para que el skill quede disponible.
 
-## Usage
+## Uso
 
-Run the slash command from any Salesforce project directory:
-
-```
-/documentar-objeto <ObjectApiName> <OrgAlias>
-```
-
-Document a single object:
+Ejecuta el slash command desde cualquier directorio de proyecto Salesforce:
 
 ```
-/documentar-objeto Account my-sandbox
+/documentar-objeto <NombreApiObjeto> <AliasOrg>
 ```
 
-Regenerate all previously documented objects:
+Documentar un objeto concreto:
 
 ```
-/documentar-objeto all my-sandbox
+/documentar-objeto Account mi-sandbox
 ```
 
-The HTML file is saved to `documentator/<ObjectApiName>.html` in the current directory, and `documentator/index.html` is updated automatically.
+Regenerar todos los objetos ya documentados:
 
-## Examples
+```
+/documentar-objeto all mi-sandbox
+```
 
-> Open [`docs/demo.html`](docs/demo.html) in any browser to try a fully interactive demo with a fictional `PetClinic__c` object — no server or Salesforce org required.
+El fichero HTML se guarda en `documentator/<NombreApiObjeto>.html` en el directorio actual, y `documentator/index.html` se actualiza automáticamente.
 
-### Fields table — search, filter and copy API names
+## Ejemplos
 
-![Fields table](docs/screenshots/fields.png)
+> Abre [`docs/demo.html`](docs/demo.html) en cualquier navegador para probar una demo completamente interactiva con el objeto ficticio `PetClinic__c` — no necesitas servidor ni org de Salesforce.
 
-### Formula fields — expandable code + AI explanation
+### Tabla de campos — búsqueda, filtros y copia de API names
 
-![Formula expand panel](docs/screenshots/formula.png)
+![Tabla de campos](docs/screenshots/fields.png)
 
-### Validation rules
+### Campos fórmula — código expandible + explicación IA
 
-![Validation rules](docs/screenshots/rules.png)
+![Panel de fórmula expandido](docs/screenshots/formula.png)
 
-### record triggeres flows
+### Reglas de validación
 
-![Triggeres flows](docs/screenshots/flows.png)
+![Reglas de validación](docs/screenshots/rules.png)
 
-### Apex Triggers — method breakdown per context
+### Record-Triggered Flows
 
-![Apex triggers section](docs/screenshots/triggers.png)
+![Flows](docs/screenshots/flows.png)
 
-### Dark mode
+### Apex Triggers — métodos por contexto
 
-![Dark mode](docs/screenshots/dark-mode.jpg)
+![Sección de Apex Triggers](docs/screenshots/triggers.png)
 
-## Project structure
+### Modo oscuro
+
+![Modo oscuro](docs/screenshots/dark-mode.jpg)
+
+## Estructura del proyecto
 
 ```
 documentar-objeto/
-├── SKILL.md                        # Skill instructions for Claude Code
+├── SKILL.md                        # Instrucciones del skill para Claude Code
 ├── README.md
 ├── docs/
-│   ├── demo.html                   # Self-contained demo (fictional object)
-│   └── screenshots/                # Images used in this README
+│   ├── demo.html                   # Demo autocontenida (objeto ficticio)
+│   └── screenshots/                # Imágenes usadas en este README
 └── scripts/
-    └── sf_doc_generator.py         # HTML generator (called by the skill)
+    └── sf_doc_generator.py         # Generador HTML (invocado por el skill)
 ```
 
-After running the skill, the target project gets:
+Tras ejecutar el skill, el proyecto de destino recibe:
 
 ```
 documentator/
 ├── index.html
 ├── Account.html
-├── _formula_cache_Account.json     # Persistent formula cache (do not delete)
+├── _formula_cache_Account.json     # Caché persistente de fórmulas (no borrar)
 └── ...
 ```
 
-## How it works
+## Cómo funciona
 
-1. **Describe** — runs `sf sobject describe` to get all field metadata  
-2. **Field descriptions** — queries `FieldDefinition` via Tooling API  
-3. **Formula cache** — loads cached explanations; only calls the Anthropic API for new or changed formulas  
-4. **Trigger analysis** — scans local `.trigger` files, detects the delegation pattern (TriggerFactory or direct handler), reads handler classes and extracts method descriptions per context  
-5. **Validation rules & flows** — queries Tooling API  
-6. **HTML generation** — combines everything into a single self-contained HTML file  
+1. **Describe** — ejecuta `sf sobject describe` para obtener la metadata de todos los campos
+2. **Descripciones de campo** — consulta `FieldDefinition` vía Tooling API
+3. **Caché de fórmulas** — carga las explicaciones cacheadas; solo llama a la API de Anthropic para fórmulas nuevas o modificadas
+4. **Análisis de triggers** — escanea los ficheros `.trigger` locales, detecta el patrón de delegación (TriggerFactory o handler directo), lee las clases handler y extrae descripciones de métodos por contexto
+5. **Reglas de validación y flows** — consulta Tooling API
+6. **Generación HTML** — combina todo en un único fichero HTML autocontenido
 
-## License
+## Licencia
 
 MIT
