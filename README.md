@@ -56,18 +56,10 @@ Run the slash command from any Salesforce project directory:
 /documentar-objeto <ObjectApiName> <OrgAlias>
 ```
 
-### Examples
-
 Document a single object:
 
 ```
 /documentar-objeto Account my-sandbox
-```
-
-Document a standard object:
-
-```
-/documentar-objeto Case production
 ```
 
 Regenerate all previously documented objects:
@@ -78,27 +70,25 @@ Regenerate all previously documented objects:
 
 The HTML file is saved to `documentator/<ObjectApiName>.html` in the current directory, and `documentator/index.html` is updated automatically.
 
-## Output
+## Examples
 
-### Index page
+> Open [`docs/demo.html`](docs/demo.html) in any browser to try a fully interactive demo with a fictional `PetClinic__c` object — no server or Salesforce org required.
 
-| Object | Fields | Custom | Validations | Flows | Triggers | Generated |
-|--------|--------|--------|-------------|-------|----------|-----------|
-| Account | 665 | 214 | 18 | 4 | 1 | 2026-05-06 10:12 |
-| PetClinic__c | 18 | 14 | 3 | 2 | 1 | 2026-05-06 10:42 |
+### Fields table — search, filter and copy API names
 
-### Object page
+![Fields table](docs/screenshots/fields.png)
 
-A fully interactive HTML page with:
+### Formula fields — expandable code + AI explanation
 
-- **Header** — object name, field counts, org alias and generation timestamp  
-- **Toolbar** — search input and filter pills (standard / custom / picklist / formula / required) with a live field counter  
-- **Fields table** — sticky header, click on any API name to copy it to the clipboard  
-- **Formula expand panel** — formula code on the left, AI explanation on the right  
-- **Validation rules, Flows and Apex Triggers** sections below the field table  
-- **Dark mode** toggle (🌙 / ☀️) shared across index and all object pages
+![Formula expand panel](docs/screenshots/formula.png)
 
-> A self-contained demo with a fictional `PetClinic__c` object is available at [`docs/demo.html`](docs/demo.html) — open it in any browser, no server required.
+### Apex Triggers — method breakdown per context
+
+![Apex triggers section](docs/screenshots/triggers.png)
+
+### Dark mode
+
+![Dark mode](docs/screenshots/dark-mode.png)
 
 ## Project structure
 
@@ -107,7 +97,8 @@ documentar-objeto/
 ├── SKILL.md                        # Skill instructions for Claude Code
 ├── README.md
 ├── docs/
-│   └── demo.html                   # Self-contained demo (fictional object)
+│   ├── demo.html                   # Self-contained demo (fictional object)
+│   └── screenshots/                # Images used in this README
 └── scripts/
     └── sf_doc_generator.py         # HTML generator (called by the skill)
 ```
