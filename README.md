@@ -82,13 +82,21 @@ The HTML file is saved to `documentator/<ObjectApiName>.html` in the current dir
 
 ![Formula expand panel](docs/screenshots/formula.png)
 
+### Validation rules
+
+![Validation rules](docs/screenshots/rules.png)
+
+### record triggeres flows
+
+![Triggeres flows](docs/screenshots/flows.png)
+
 ### Apex Triggers — method breakdown per context
 
 ![Apex triggers section](docs/screenshots/triggers.png)
 
 ### Dark mode
 
-![Dark mode](docs/screenshots/dark-mode.png)
+![Dark mode](docs/screenshots/dark-mode.jpg)
 
 ## Project structure
 
