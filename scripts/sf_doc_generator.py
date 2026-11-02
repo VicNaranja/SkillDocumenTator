@@ -51,8 +51,11 @@ def get_validation_rules(object_name, org_alias):
 
 
 def get_record_triggered_flows(object_label, org_alias):
+    # VersionNumber es la clave de invalidacion de cache: Flow Builder crea una version
+    # nueva en cada guardado, mientras que LastModifiedDate tambien se mueve al activar.
     return run_soql(
-        f"SELECT ApiName, Label, TriggerType, IsActive, Description FROM FlowDefinitionView "
+        f"SELECT ApiName, Label, TriggerType, IsActive, Description, VersionNumber, LastModifiedDate "
+        f"FROM FlowDefinitionView "
         f"WHERE TriggerObjectOrEventLabel = '{object_label}' "
         f"AND TriggerType IN ('RecordBeforeSave', 'RecordAfterSave', 'RecordBeforeDelete')",
         org_alias, tooling=False
@@ -291,9 +294,10 @@ def build_validation_rules_html(rules):
 </table>'''
 
 
-def build_flows_html(flows):
+def build_flows_html(flows, flow_descriptions=None):
     if not flows:
         return '<p class="empty-section">No hay Record-Triggered Flows en este objeto.</p>'
+    fd = flow_descriptions or {}
     trigger_labels = {
         'RecordBeforeSave': 'Before Save',
         'RecordAfterSave': 'After Save',
@@ -304,25 +308,73 @@ def build_flows_html(flows):
         api_name = escape(f.get('ApiName', ''))
         label = escape(f.get('Label', ''))
         trigger = escape(trigger_labels.get(f.get('TriggerType', ''), f.get('TriggerType', '')))
-        desc = escape(f.get('Description') or '')
+        version = f.get('VersionNumber', '')
         active = f.get('IsActive', False)
         status_class = 'active-badge' if active else 'inactive-badge'
         status_label = 'Activo' if active else 'Inactivo'
+
+        # La descripcion del org manda; la generada por IA solo rellena huecos.
+        own_desc = (f.get('Description') or '').strip()
+        if own_desc:
+            desc_html = escape(own_desc)
+        else:
+            generated = (fd.get(f.get('ApiName', '')) or '').strip()
+            if generated:
+                desc_html = (
+                    f'<span class="ai-tag" title="Generada por IA a partir del XML del flow">IA</span> '
+                    f'{escape(generated)}'
+                )
+            else:
+                desc_html = '<span class="no-desc">Sin descripción</span>'
+
         rows += (
             f'<tr>'
             f'<td><code>{api_name}</code></td>'
             f'<td>{label}</td>'
             f'<td><span class="{status_class}">{status_label}</span></td>'
             f'<td>{trigger}</td>'
-            f'<td class="desc">{desc}</td>'
+            f'<td class="flow-version">v{escape(str(version))}</td>'
+            f'<td class="desc">{desc_html}</td>'
             f'</tr>\n'
         )
     return f'''<table class="secondary-table">
   <thead><tr>
-    <th>API Name</th><th>Label</th><th>Estado</th><th>Trigger</th><th>Descripción</th>
+    <th>API Name</th><th>Label</th><th>Estado</th><th>Trigger</th><th>Ver.</th><th>Descripción</th>
   </tr></thead>
   <tbody>{rows}</tbody>
 </table>'''
+
+
+# ── Revisar: observaciones automaticas ───────────────────────────────────────
+
+def build_review_html(review_items):
+    if not review_items:
+        return '<p class="empty-section">Sin observaciones para este objeto.</p>'
+    sev_order = {'error': 0, 'warning': 1, 'info': 2}
+    sev_label = {'error': 'Error', 'warning': 'Aviso', 'info': 'Nota'}
+    items = sorted(review_items, key=lambda r: sev_order.get(r.get('severity', 'info'), 9))
+    html = ''
+    for r in items:
+        sev = r.get('severity', 'info')
+        if sev not in sev_order:
+            sev = 'info'
+        area = escape(r.get('area', ''))
+        target = escape(r.get('target', ''))
+        finding = escape(r.get('finding', ''))
+        impact = escape(r.get('impact', ''))
+        impact_html = f'<div class="review-impact"><strong>Impacto:</strong> {impact}</div>' if impact else ''
+        target_html = f'<code>{target}</code>' if target else ''
+        html += (
+            f'<div class="review-item review-{sev}">'
+            f'<div class="review-head">'
+            f'<span class="review-sev sev-{sev}">{sev_label[sev]}</span>'
+            f'<span class="review-area">{area}</span>{target_html}'
+            f'</div>'
+            f'<div class="review-finding">{finding}</div>'
+            f'{impact_html}'
+            f'</div>\n'
+        )
+    return html
 
 
 # ── Apex Triggers ────────────────────────────────────────────────────────────
@@ -387,7 +439,8 @@ def update_index(output_dir, object_name, stats):
     manifest = [e for e in manifest if e['object'] != object_name]
     manifest.append({
         'object': object_name,
-        'file': f'{object_name}.html',
+        # Un subdirectorio por objeto: el HTML y sus caches viven juntos.
+        'file': f'{object_name}/{object_name}.html',
         'fields': stats['total'],
         'custom': stats['custom'],
         'validations': stats['validations'],
@@ -483,7 +536,8 @@ def update_index(output_dir, object_name, stats):
 
 # ── Main HTML generator ──────────────────────────────────────────────────────
 
-def generate_html(object_name, org_alias, output_dir, explanations_file=None, triggers_file=None):
+def generate_html(object_name, org_alias, output_dir, explanations_file=None, triggers_file=None,
+                  flow_desc_file=None, review_file=None):
     print(f"Describing {object_name} on {org_alias}...")
     describe_data = run_sf_describe(object_name, org_alias)
     describe_result = describe_data['result']
@@ -526,11 +580,26 @@ def generate_html(object_name, org_alias, output_dir, explanations_file=None, tr
 
     trigger_count = len([t for t in apex_triggers if t.get('status') == 'active'])
 
+    if flow_desc_file and os.path.exists(flow_desc_file):
+        print(f"Loading flow descriptions from {flow_desc_file}...")
+        with open(flow_desc_file, encoding='utf-8-sig') as f:
+            flow_descriptions = json.load(f)
+    else:
+        flow_descriptions = {}
+
+    if review_file and os.path.exists(review_file):
+        print(f"Loading review notes from {review_file}...")
+        with open(review_file, encoding='utf-8-sig') as f:
+            review_items = json.load(f)
+    else:
+        review_items = []
+
     sections = categorize_fields(fields)
     rows_html = build_field_rows(sections, descriptions, formula_explanations)
     val_html = build_validation_rules_html(val_rules)
-    flows_html = build_flows_html(flows)
+    flows_html = build_flows_html(flows, flow_descriptions)
     triggers_html = build_triggers_html(apex_triggers)
+    review_html = build_review_html(review_items)
     now = datetime.now().strftime('%Y-%m-%d %H:%M')
 
     html = f'''<!DOCTYPE html>
@@ -867,6 +936,45 @@ def generate_html(object_name, org_alias, output_dir, explanations_file=None, tr
 
   .empty-section {{ padding: 16px 20px; color: #888; font-style: italic; }}
 
+  /* ── Flows ── */
+  .flow-version {{
+    font-family: 'SF Mono', 'Fira Code', Consolas, monospace;
+    font-size: 12px; color: var(--text-muted); white-space: nowrap;
+  }}
+  .no-desc {{ color: var(--text-muted); font-style: italic; }}
+  .ai-tag {{
+    display: inline-block; padding: 1px 6px; border-radius: 4px; margin-right: 6px;
+    background: var(--sec-bg); color: var(--sec-color);
+    font-size: 10px; font-weight: 700; letter-spacing: .04em; vertical-align: 1px;
+  }}
+
+  /* ── Revisar ── */
+  .review-disclaimer {{
+    padding: 10px 20px; font-size: 12px; line-height: 1.5;
+    color: var(--text-muted); border-bottom: 1px solid var(--border);
+  }}
+  .review-item {{ padding: 12px 20px; border-bottom: 1px solid var(--border); border-left: 3px solid transparent; }}
+  .review-item:last-child {{ border-bottom: none; }}
+  .review-error {{ border-left-color: #dc3545; }}
+  .review-warning {{ border-left-color: #f0ad4e; }}
+  .review-info {{ border-left-color: #6c9bd1; }}
+  .review-head {{ display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 5px; }}
+  .review-sev {{
+    display: inline-block; padding: 2px 8px; border-radius: 12px;
+    font-size: 11px; font-weight: 600;
+  }}
+  .sev-error {{ background: #f8d7da; color: #721c24; }}
+  .sev-warning {{ background: #fff3cd; color: #7a5b00; }}
+  .sev-info {{ background: #e2eaf5; color: #2c4a6b; }}
+  .review-area {{ font-size: 12px; font-weight: 600; color: var(--text-muted); }}
+  .review-head code {{
+    font-family: 'SF Mono', 'Fira Code', Consolas, monospace;
+    font-size: 12px; background: var(--code-bg); color: var(--code-color);
+    padding: 1px 6px; border-radius: 4px;
+  }}
+  .review-finding {{ font-size: 13px; line-height: 1.55; }}
+  .review-impact {{ font-size: 12px; line-height: 1.5; color: var(--text-muted); margin-top: 5px; }}
+
   /* ── Apex Triggers ── */
   .trigger-block {{ border-bottom: 1px solid var(--border); padding: 14px 20px; }}
   .trigger-block:last-child {{ border-bottom: none; }}
@@ -893,7 +1001,7 @@ def generate_html(object_name, org_alias, output_dir, explanations_file=None, tr
 </head>
 <body>
 <div class="container">
-  <a class="back" href="index.html">← Volver al índice</a>
+  <a class="back" href="../index.html">← Volver al índice</a>
 
   <header>
     <h1>{escape(object_name)} <span>Salesforce Object</span></h1>
@@ -956,6 +1064,16 @@ def generate_html(object_name, org_alias, output_dir, explanations_file=None, tr
   <div class="section-block">
     <div class="section-title">Apex Triggers <span>{len(apex_triggers)} trigger{'s' if len(apex_triggers) != 1 else ''}</span></div>
     {triggers_html}
+  </div>
+
+  <!-- Revisar -->
+  <div class="section-block review-block">
+    <div class="section-title">Revisar <span>{len(review_items)} observaci{'ones' if len(review_items) != 1 else 'ón'}</span></div>
+    <div class="review-disclaimer">
+      Observaciones generadas automáticamente al analizar el objeto. <strong>No están verificadas</strong>:
+      contrástalas antes de actuar y no las cites como decisión de arquitectura.
+    </div>
+    {review_html}
   </div>
 
 </div>
@@ -1050,7 +1168,9 @@ def generate_html(object_name, org_alias, output_dir, explanations_file=None, tr
 </body>
 </html>'''
 
-    output_path = os.path.join(output_dir, f'{object_name}.html')
+    object_dir = os.path.join(output_dir, object_name)
+    os.makedirs(object_dir, exist_ok=True)
+    output_path = os.path.join(object_dir, f'{object_name}.html')
     with open(output_path, 'w', encoding='utf-8') as f:
         f.write(html)
     print(f"Generado: {output_path}")
@@ -1068,14 +1188,18 @@ def generate_html(object_name, org_alias, output_dir, explanations_file=None, tr
 
 if __name__ == '__main__':
     if len(sys.argv) < 3:
-        print("Uso: python sf_doc_generator.py <ObjectApiName> <OrgAlias> [explanations.json]")
+        print("Uso: python sf_doc_generator.py <ObjectApiName> <OrgAlias> "
+              "[explanations.json] [triggers.json] [flow_descriptions.json] [review.json]")
         sys.exit(1)
 
     obj_name = sys.argv[1]
     org = sys.argv[2]
     explanations_file = sys.argv[3] if len(sys.argv) > 3 else None
     triggers_file = sys.argv[4] if len(sys.argv) > 4 else None
+    flow_desc_file = sys.argv[5] if len(sys.argv) > 5 else None
+    review_file = sys.argv[6] if len(sys.argv) > 6 else None
     out = os.path.join(os.getcwd(), 'documentator')
     os.makedirs(out, exist_ok=True)
 
-    generate_html(obj_name, org, out, explanations_file=explanations_file, triggers_file=triggers_file)
+    generate_html(obj_name, org, out, explanations_file=explanations_file, triggers_file=triggers_file,
+                  flow_desc_file=flow_desc_file, review_file=review_file)
