@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>__TITULO__ · Documentator</title>
+<script>try{if(localStorage.getItem('sf-docs-theme')==='dark')document.documentElement.setAttribute('data-theme','dark');}catch(e){}</script>
+<style>/*__CSS__*/</style>
+</head>
+<body data-pagina="__PAGINA__">
+<div class="contenedor">
+
+<a class="volver" href="/">← Volver al índice</a>
+
+<header class="cabecera">
+  <div class="cabecera-fila">
+    <h1>__TITULO__ <span class="sutil">Salesforce Configuration</span></h1>
+    <button type="button" id="dm-toggle" class="dm-toggle" title="Cambiar tema">🌙</button>
+  </div>
+  <div class="sello" id="sello"></div>
+  <div class="filtros" role="group" aria-label="Org">
+    <label class="campo">Org <select id="org"></select></label>
+    <button type="button" class="recargar" id="recargar">Actualizar</button>
+    <span class="filtros-nota" id="filtros-nota"></span>
+  </div>
+</header>
+
+<main id="secciones"></main>
+
+<footer class="pie">
+  <p>
+    Los datos se consultan al org en cada carga y en cada cambio de org; no se guardan en disco. La hora
+    de la última consulta aparece en la cabecera.
+  </p>
+</footer>
+
+</div>
+
+<div class="pista" id="pista" role="status" aria-live="polite"></div>
+
+<script>/*__JS__*/</script>
+
+</body>
+</html>

@@ -1,12 +1,12 @@
 ---
 name: documentar-objeto
-description: Genera documentación HTML de un objeto Salesforce con todos sus campos, tipos, descripciones, valores picklist (API value → Label), reglas de validación, record-triggered flows y apex triggers. Actívalo cuando el usuario pida "documenta el objeto X", "documentar objeto", "/documentar-objeto ObjectName".
+description: Genera documentación HTML de un objeto Salesforce con todos sus campos, tipos, descripciones, valores picklist (API value → Label), reglas de validación, record-triggered flows y apex triggers, con un botón para actualizarla desde el org elegido; y abre las páginas en vivo de usuarios, licencias y flows del org. Actívalo cuando el usuario pida "documenta el objeto X", "documentar objeto", "/documentar-objeto ObjectName", "documentar userList", "documentar userLicence" o "documentar flows".
 license: MIT
 compatibility: "Requiere Python 3 y Salesforce CLI (sf) autenticado en la org de destino."
 allowed-tools: Bash PowerShell Read Write Glob Grep
 metadata:
   author: vsaez2
-  version: "4.0"
+  version: "5.0"
 ---
 
 Eres un documentador de objetos Salesforce. Dado el nombre de un objeto y un alias de org, generas un fichero HTML con toda la metadata del objeto incluyendo explicaciones de fórmulas y descripciones de flows generadas por IA, más una sección de observaciones a revisar.
@@ -17,13 +17,14 @@ Activa esta skill cuando el usuario:
 - Use `/documentar-objeto` con o sin argumentos
 - Pida "documenta el objeto X", "genera la documentación de X", "quiero el HTML del objeto X"
 - Mencione documentar un sObject de Salesforce
+- Pida `documentar userList`, `documentar userLicence` o `documentar flows`: son las páginas en vivo (ver «Páginas en vivo»), no un objeto
 
 ## Pasos
 
 ### 1. Obtener parámetros
 
 Extrae de `$ARGUMENTS`:
-- Primera palabra → nombre del objeto (API Name), ej: `VoiceCall`, `Case`, `Account`; o `all` para regenerar todos
+- Primera palabra → nombre del objeto (API Name), ej: `VoiceCall`, `Case`, `Account`; o `all` para regenerar todos; o `userList`, `userLicence` o `flows`, que no son objetos y van por «Páginas en vivo» (no sigas los pasos 2–8)
 - Segunda palabra → alias de org (opcional)
 
 Si no se proporciona alias, lista los orgs disponibles y pide al usuario que confirme:
@@ -46,13 +47,13 @@ Si Glob no devuelve nada, informa al usuario y para.
 
 ### 3. Campos fórmula y caché de explicaciones
 
-Obtén el describe del objeto:
+Obtén las fórmulas del objeto con el generador (ruta del paso 2), que devuelve un JSON `{ "label": "Etiqueta", "formulas": { "Campo__c": "fórmula" } }` con solo los campos `calculated = true`; la `label` es la que pide el paso 4:
 
 ```bash
-sf sobject describe --sobject OBJECT_NAME --target-org ORG_ALIAS --json
+python "<RUTA_SCRIPT>" --formulas OBJECT_NAME ORG_ALIAS
 ```
 
-Extrae los campos con `calculated = true` y su `calculatedFormula`.
+No uses el `sf sobject describe` entero: en un objeto grande no cabe en la salida de la herramienta, llega truncado y no se pueden comparar las fórmulas con el caché.
 
 Lee `documentator/OBJECT_NAME/_formula_cache.json` si existe:
 
@@ -96,13 +97,15 @@ Para cada flow sin descripción propia:
 
 `VersionNumber` es la clave correcta de invalidación: Flow Builder crea una versión nueva en cada guardado. `LastModifiedDate` no sirve, porque también se mueve al activar o desactivar sin tocar la lógica.
 
-Para descargar los flows sin ensuciar `force-app/`, escribe un manifiesto temporal con los que necesites y usa `--target-metadata-dir`:
+Para descargar los flows sin ensuciar `force-app/`, escribe un manifiesto temporal con los que necesites en `documentator/_tmp_flows.xml` y usa `--target-metadata-dir`:
 
 ```bash
-sf project retrieve start --manifest <tmp>.xml --target-org ORG_ALIAS --target-metadata-dir .tmp_flows --unzip
+sf project retrieve start --manifest documentator/_tmp_flows.xml --target-org ORG_ALIAS --target-metadata-dir documentator/.tmp_flows --unzip
 ```
 
-Los `.flow` quedan en `.tmp_flows/unpackaged/unpackaged/flows/`. Borra `.tmp_flows` y el manifiesto al terminar.
+Los `.flow` quedan en `documentator/.tmp_flows/unpackaged/unpackaged/flows/`. No los borres tú: los borra el generador al terminar (paso 7), junto con el manifiesto.
+
+Escribe estas rutas así, relativas y con `/`: son las que permite el modo no interactivo (ver «Modo no interactivo»), y cualquier otra se deniega.
 
 Tres gotchas comprobados:
 
@@ -227,13 +230,52 @@ documentator/
     └── ...
 ```
 
-Los cuatro temporales (`_explanations_`, `_triggers_`, `_flow_descriptions_`, `_review_`) se escriben en la raíz de `documentator/` y **se borran** al terminar. Los dos cachés viven dentro del subdirectorio del objeto y **no se borran**: son lo que evita repetir el trabajo en la siguiente ejecución.
+Los cuatro temporales (`_explanations_`, `_triggers_`, `_flow_descriptions_`, `_review_`) y `_tmp_flows.xml` se escriben en la raíz de `documentator/`, y **los borra el propio generador** al terminar, igual que `documentator/.tmp_flows`: no hay que borrarlos a mano. Los dos cachés viven dentro del subdirectorio del objeto y **no se borran**: son lo que evita repetir el trabajo en la siguiente ejecución.
 
 Informa de la ruta del fichero generado e indica:
 - Explicaciones de fórmula reutilizadas del caché vs regeneradas
 - Descripciones de flow reutilizadas vs regeneradas, y cuántos flows tenían descripción propia
 - Triggers encontrados y su estado
 - Número de observaciones en la sección Revisar, por severidad
+
+Y que la página se abre con el servidor (ver «Servidor y botón Actualizar»): abierta desde el disco se ve igual, pero el botón no funciona.
+
+## Servidor y botón Actualizar
+
+`scripts/servir_documentator.py` sirve `documentator/` en `http://127.0.0.1:8788/`, junto con las páginas en vivo. Se arranca desde la raíz del proyecto:
+
+```bash
+python "<RUTA_SCRIPTS>/servir_documentator.py" --org ORG_ALIAS --abrir <ruta>
+```
+
+`--abrir` es la ruta que abre en el navegador (`VoiceCall/VoiceCall.html`, `vivo/usuarios`…); sin ella, el índice. Antes de arrancarlo, mira si ya está levantado pidiendo `http://127.0.0.1:8788/api/config`: si responde, no lances otro, abre la URL en el navegador. Si no, lánzalo **en segundo plano**, porque no termina hasta Ctrl+C.
+
+Cada página de objeto tiene en la cabecera un selector de org y el botón **Actualizar**. El selector solo dice de qué org sale la siguiente actualización; la página que se ve es siempre la última generada, con su org y su fecha en la cabecera. Al pulsar, el servidor lanza Claude Code sin interfaz (`claude -p`) con esta skill para ese objeto y ese org, y la página se recarga cuando termina. Las actualizaciones van de una en una, porque todas reescriben el índice y el manifiesto: las que se piden mientras otra corre esperan en cola.
+
+## Modo no interactivo
+
+Cuando la sesión la lanza el botón, el prompt lo dice («Actualización automática de documentación…») y trae el objeto y el org. En ese modo:
+
+- No preguntes nada ni pidas confirmación: no hay nadie para contestar. El alias viene dado; no listes orgs.
+- La sesión va en modo `dontAsk` con una lista cerrada de herramientas (`HERRAMIENTAS` en `servir_documentator.py`): leer el repo; escribir solo en `documentator/`; `sf sobject describe`, `sf data query`, `sf api request rest` sin `--method`, `sf project retrieve start` a `documentator/.tmp_flows`; y el generador con `python`, que borra él mismo los temporales. Lo demás se deniega sin preguntar, así que usa exactamente los comandos y las rutas de esta skill.
+- Si un paso falla, sigue con lo que tengas, como en el modo normal (fórmulas o flows sin explicación). Si no puedes ejecutar el generador, para.
+- Termina con una frase: qué se ha actualizado o por qué ha fallado. Es lo que la página enseña.
+
+## Páginas en vivo
+
+`documentar userList`, `documentar userLicence` y `documentar flows` no generan ningún fichero: abren una página del servidor que consulta el org en cada carga. El selector de org ofrece los alias que la CLI tiene autenticados, recuerda el último elegido y marca `PRODUCCIÓN` cuando el org no es un sandbox (lo pregunta al org, no lo deduce del alias). No se guardan en disco porque muestran datos de usuarios del org, y un fichero con ellos acabaría versionado.
+
+| Petición | Página | Qué tiene |
+|---|---|---|
+| `userList` | `vivo/usuarios` | Gestión de usuarios: listado de usuarios con filtros y columnas, asignar y quitar permisos, visor de permission set groups y visor de permission sets y perfiles |
+| `userLicence` | `vivo/licencias` | Estado de las licencias del org: lo que mide cada gráfico lo explica la propia página |
+| `flows` | `vivo/flows` | Visor de todos los flows del org, con filtros, buscador y ordenación |
+
+Para cualquiera de las tres: arranca el servidor (o reutiliza el que ya esté) con `--org ORG_ALIAS --abrir vivo/<página>` e informa de la URL. Si no se da alias, el que se haya usado en la conversación; si no hay, pregunta.
+
+**La gestión de usuarios escribe en el org**: asignar y quitar permisos, por POST y con confirmación en la página, que en producción exige escribir el alias. Es la única escritura del documentator.
+
+Cada página es una entrada de `PAGINAS` en `scripts/secciones/__init__.py`, con sus módulos de sección (`recoger(org)` y, si lista algo bajo demanda, `detalle(org, cual)`), y su render en `scripts/plantilla/vivo.js`.
 
 ## Notas
 

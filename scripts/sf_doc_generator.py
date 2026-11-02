@@ -6,6 +6,7 @@ Usage: python sf_doc_generator.py <ObjectApiName> <OrgAlias>
 
 import json
 import re
+import shutil
 import subprocess
 import sys
 import os
@@ -264,6 +265,22 @@ def build_field_rows(sections, descriptions, formula_explanations=None):
     return html
 
 
+def active_filter_html(prefix, total, label, empty, rows, table_head):
+    """
+    Tabla de una sección con su barra de filtro «Solo activos». Cada fila lleva
+    `data-activo`; el script ACTIVE_FILTER_SCRIPT oculta las inactivas.
+    """
+    return f'''<div class="section-toolbar">
+  <button type="button" class="filter-btn solo-activos" data-prefijo="{prefix}" aria-pressed="false">{label}</button>
+  <span class="count-label">Mostrando <strong id="{prefix}-visibles">{total}</strong> de {total}</span>
+</div>
+<table class="secondary-table" id="{prefix}-tabla">
+  <thead><tr>{table_head}</tr></thead>
+  <tbody>{rows}</tbody>
+</table>
+<p class="empty-section" id="{prefix}-sin-activos" hidden>{empty}</p>'''
+
+
 def build_validation_rules_html(rules):
     if not rules:
         return '<p class="empty-section">No hay reglas de validación en este objeto.</p>'
@@ -277,7 +294,7 @@ def build_validation_rules_html(rules):
         status_class = 'active-badge' if active else 'inactive-badge'
         status_label = 'Activa' if active else 'Inactiva'
         rows += (
-            f'<tr>'
+            f'<tr class="filtrable" data-activo="{1 if active else 0}">'
             f'<td><code>{name}</code></td>'
             f'<td><span class="{status_class}">{status_label}</span></td>'
             f'<td class="desc">{desc}</td>'
@@ -285,13 +302,10 @@ def build_validation_rules_html(rules):
             f'<td>{field}</td>'
             f'</tr>\n'
         )
-    return f'''<table class="secondary-table">
-  <thead><tr>
-    <th>Nombre</th><th>Estado</th><th>Descripción</th>
-    <th>Mensaje de error</th><th>Campo de error</th>
-  </tr></thead>
-  <tbody>{rows}</tbody>
-</table>'''
+    return active_filter_html(
+        'validaciones', len(rules), 'Solo activas', 'Ninguna regla de validación activa.', rows,
+        '<th>Nombre</th><th>Estado</th><th>Descripción</th><th>Mensaje de error</th><th>Campo de error</th>',
+    )
 
 
 def build_flows_html(flows, flow_descriptions=None):
@@ -328,7 +342,7 @@ def build_flows_html(flows, flow_descriptions=None):
                 desc_html = '<span class="no-desc">Sin descripción</span>'
 
         rows += (
-            f'<tr>'
+            f'<tr class="filtrable" data-activo="{1 if active else 0}">'
             f'<td><code>{api_name}</code></td>'
             f'<td>{label}</td>'
             f'<td><span class="{status_class}">{status_label}</span></td>'
@@ -337,12 +351,10 @@ def build_flows_html(flows, flow_descriptions=None):
             f'<td class="desc">{desc_html}</td>'
             f'</tr>\n'
         )
-    return f'''<table class="secondary-table">
-  <thead><tr>
-    <th>API Name</th><th>Label</th><th>Estado</th><th>Trigger</th><th>Ver.</th><th>Descripción</th>
-  </tr></thead>
-  <tbody>{rows}</tbody>
-</table>'''
+    return active_filter_html(
+        'flows', len(flows), 'Solo activos', 'Ningún flow activo.', rows,
+        '<th>API Name</th><th>Label</th><th>Estado</th><th>Trigger</th><th>Ver.</th><th>Descripción</th>',
+    )
 
 
 # ── Revisar: observaciones automaticas ───────────────────────────────────────
@@ -379,6 +391,17 @@ def build_review_html(review_items):
 
 # ── Apex Triggers ────────────────────────────────────────────────────────────
 
+# Orden de los contextos de un trigger: por operación y, dentro de ella, before
+# antes que after. Lo que no se reconoce va al final, en el orden en que venía.
+_OPERATIONS = ['insert', 'update', 'delete', 'undelete']
+
+
+def _context_order(ctx):
+    words = (ctx.get('event') or '').lower().split()
+    operation = next((_OPERATIONS.index(w) for w in reversed(words) if w in _OPERATIONS), len(_OPERATIONS))
+    return operation, 0 if 'before' in words else 1
+
+
 def build_triggers_html(triggers):
     if not triggers:
         return '<p class="empty-section">No se encontraron Apex Triggers en el código fuente para este objeto.</p>'
@@ -406,16 +429,22 @@ def build_triggers_html(triggers):
             html += f'<p class="trigger-note">{note}</p>'
         if contexts:
             rows = ''
-            for ctx in contexts:
+            previous = None
+            for ctx in sorted(contexts, key=_context_order):
                 event = escape(ctx.get('event', ''))
-                for m in ctx.get('methods', []):
+                operation = _context_order(ctx)[0]
+                for i, m in enumerate(ctx.get('methods', [])):
+                    # La primera fila de cada operación (insert, update…) abre grupo.
+                    starts = i == 0 and previous is not None and operation != previous
+                    row_class = ' class="ctx-group-start"' if starts else ''
                     rows += (
-                        f'<tr>'
+                        f'<tr{row_class}>'
                         f'<td class="trigger-ctx">{event}</td>'
                         f'<td><code>{escape(m.get("name",""))}</code></td>'
                         f'<td class="desc">{escape(m.get("description",""))}</td>'
                         f'</tr>\n'
                     )
+                previous = operation
             html += f'''<table class="secondary-table">
   <thead><tr><th>Contexto</th><th>Método / Acción</th><th>Descripción</th></tr></thead>
   <tbody>{rows}</tbody>
@@ -426,7 +455,121 @@ def build_triggers_html(triggers):
     return html
 
 
+# ── Filtro «Solo activos» de flows y reglas de validación ────────────────────
+
+ACTIVE_FILTER_SCRIPT = r'''
+document.querySelectorAll('.solo-activos').forEach(function (boton) {
+  var prefijo = boton.dataset.prefijo;
+  var tabla = document.getElementById(prefijo + '-tabla');
+  var filas = tabla.querySelectorAll('tr.filtrable');
+  var contador = document.getElementById(prefijo + '-visibles');
+  var vacio = document.getElementById(prefijo + '-sin-activos');
+  boton.addEventListener('click', function () {
+    var solo = !boton.classList.contains('active');
+    boton.classList.toggle('active', solo);
+    boton.setAttribute('aria-pressed', solo ? 'true' : 'false');
+    var visibles = 0;
+    filas.forEach(function (fila) {
+      var ver = !solo || fila.dataset.activo === '1';
+      fila.style.display = ver ? '' : 'none';
+      if (ver) visibles++;
+    });
+    contador.textContent = visibles;
+    tabla.hidden = !visibles;
+    vacio.hidden = !!visibles;
+  });
+});
+'''
+
+
+# ── Botón «Actualizar» de la página del objeto ───────────────────────────────
+
+# Habla con servir_documentator.py: pide la actualización con el org elegido y
+# sigue su estado hasta recargar la página. Abierta desde el disco no hay a quién
+# pedírsela, así que solo se enseña la nota.
+UPDATE_SCRIPT = r'''
+(function () {
+  var caja = document.getElementById('actualizar');
+  var nota = document.getElementById('act-nota');
+  var selector = document.getElementById('act-org');
+  var boton = document.getElementById('act-boton');
+  var estado = document.getElementById('act-estado');
+  var objeto = caja.dataset.objeto;
+  var orgPagina = caja.dataset.org;
+
+  if (location.protocol === 'file:') { nota.hidden = false; return; }
+
+  function pintar(e) {
+    var enCurso = e.estado === 'en-cola' || e.estado === 'actualizando';
+    boton.disabled = enCurso;
+    selector.disabled = enCurso;
+    estado.classList.toggle('error', e.estado === 'error');
+    estado.textContent =
+      e.estado === 'en-cola' ? 'En cola: desde ' + e.org + ', pedida a las ' + e.pedido + '…' :
+      e.estado === 'actualizando' ? 'Actualizando desde ' + e.org + ' (empezó a las ' + e.inicio + '). Tarda unos minutos…' :
+      e.estado === 'error' ? 'No se pudo actualizar desde ' + e.org + ': ' + e.mensaje :
+      '';
+    if (enCurso) selector.value = e.org;
+  }
+
+  // `inicial`: el estado que había al abrir la página. Un «hecho» de entonces es
+  // el de la versión que ya se está viendo, y recargar por él no acabaría nunca.
+  function vigilar(inicial) {
+    fetch('/api/actualizacion?objeto=' + encodeURIComponent(objeto), { cache: 'no-store' })
+      .then(function (r) { return r.json(); })
+      .then(function (e) {
+        if (e.estado === 'hecho') { if (!inicial) location.reload(); return; }
+        pintar(e);
+        if (e.estado === 'en-cola' || e.estado === 'actualizando') setTimeout(function () { vigilar(false); }, 4000);
+      })
+      .catch(function () { setTimeout(function () { vigilar(inicial); }, 8000); });
+  }
+
+  fetch('/api/config', { cache: 'no-store' })
+    .then(function (r) { return r.json(); })
+    .then(function (config) {
+      var orgs = config.orgs && config.orgs.length ? config.orgs : [orgPagina];
+      orgs.forEach(function (alias) {
+        var opcion = document.createElement('option');
+        opcion.value = alias;
+        opcion.textContent = alias;
+        selector.appendChild(opcion);
+      });
+      selector.value = orgs.indexOf(orgPagina) !== -1 ? orgPagina : config.org;
+      caja.hidden = false;
+      vigilar(true);
+    })
+    .catch(function () { nota.hidden = false; });
+
+  boton.addEventListener('click', function () {
+    boton.disabled = true;
+    fetch('/api/actualizar', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Documentator': '1' },
+      body: JSON.stringify({ objeto: objeto, org: selector.value })
+    })
+      .then(function (r) { return r.json(); })
+      .then(function (e) {
+        if (e.error) { pintar({ estado: 'error', org: selector.value, mensaje: e.error }); return; }
+        pintar(e);
+        vigilar(false);
+      })
+      .catch(function (error) { pintar({ estado: 'error', org: selector.value, mensaje: String(error) }); });
+  });
+})();
+'''
+
+
 # ── Index management ─────────────────────────────────────────────────────────
+
+# Páginas que consultan el org al abrirlas: las sirve servir_documentator.py y no
+# se guardan en disco.
+LIVE_PAGES = [
+    ('vivo/usuarios', 'Gestión de usuarios', 'Usuarios, permission set groups, permission sets y perfiles'),
+    ('vivo/licencias', 'Licencias', 'Estado de las licencias del org'),
+    ('vivo/flows', 'Flows', 'Todos los flows del org'),
+]
+
 
 def update_index(output_dir, object_name, stats):
     manifest_path = os.path.join(output_dir, 'manifest.json')
@@ -452,6 +595,22 @@ def update_index(output_dir, object_name, stats):
 
     with open(manifest_path, 'w', encoding='utf-8') as f:
         json.dump(manifest, f, indent=2, ensure_ascii=False)
+
+    write_index(output_dir, manifest)
+
+
+def write_index(output_dir, manifest=None):
+    if manifest is None:
+        manifest_path = os.path.join(output_dir, 'manifest.json')
+        manifest = []
+        if os.path.exists(manifest_path):
+            with open(manifest_path, encoding='utf-8') as f:
+                manifest = json.load(f)
+
+    live = ''.join(
+        f'<li><a href="{href}">{escape(title)}</a> <span class="num">— {escape(desc)}</span></li>'
+        for href, title, desc in LIVE_PAGES
+    )
 
     rows = ''
     for e in manifest:
@@ -494,6 +653,9 @@ def update_index(output_dir, object_name, stats):
   a:hover {{ text-decoration: underline; }}
   .num {{ color: var(--text-muted); font-size: 13px; }}
   .date {{ color: var(--text-muted); font-size: 12px; }}
+  .live {{ margin-top: 24px; background: var(--surface); box-shadow: 0 1px 3px rgba(0,0,0,0.1); border-radius: 8px; overflow: hidden; }}
+  .live h2 {{ background: linear-gradient(135deg, #0070d2, #1589ee); color: #fff; padding: 12px 24px; font-size: 15px; font-weight: 700; }}
+  .live ul {{ list-style: none; display: grid; gap: 8px; padding: 16px 24px; }}
 </style>
 </head>
 <body>
@@ -513,6 +675,10 @@ def update_index(output_dir, object_name, stats):
 {rows}
     </tbody>
   </table>
+  <section class="live">
+    <h2>Salesforce Configuration</h2>
+    <ul>{live}</ul>
+  </section>
 </div>
 <script>
 (function(){{
@@ -662,6 +828,17 @@ def generate_html(object_name, org_alias, output_dir, explanations_file=None, tr
 
   .meta {{ display: flex; flex-wrap: wrap; gap: 18px; font-size: 13px; opacity: 0.9; }}
   .badge {{ background: rgba(255,255,255,0.2); padding: 2px 9px; border-radius: 12px; font-weight: 600; }}
+
+  /* ── Actualizar desde un org ── */
+  .actualizar {{ display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 16px; font-size: 13px; }}
+  .actualizar[hidden], .actualizar-nota[hidden] {{ display: none; }}
+  .actualizar select {{ padding: 5px 8px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.5); background: rgba(255,255,255,0.95); color: #1a1a2e; font-size: 13px; }}
+  .actualizar button {{ padding: 6px 14px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.6); background: rgba(255,255,255,0.18); color: #fff; font-weight: 600; cursor: pointer; font-size: 13px; }}
+  .actualizar button:hover {{ background: rgba(255,255,255,0.3); }}
+  .actualizar button:disabled {{ opacity: 0.55; cursor: default; }}
+  .actualizar-estado {{ opacity: 0.95; }}
+  .actualizar-estado.error {{ background: rgba(180,20,20,0.85); padding: 3px 9px; border-radius: 6px; }}
+  .actualizar-nota {{ margin-top: 14px; font-size: 12px; opacity: 0.85; }}
 
   /* ── Toolbar ── */
   .toolbar {{
@@ -879,6 +1056,8 @@ def generate_html(object_name, org_alias, output_dir, explanations_file=None, tr
   .desc {{ color: var(--text-dim); font-style: italic; min-width: 280px; max-width: 380px; }}
 
   ul.picklist-values {{ list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 3px; }}
+  /* Con muchos valores la fila se haría larguísima: pasado este alto, scroll dentro de la celda. */
+  ul.picklist-values {{ max-height: 220px; overflow-y: auto; padding-right: 6px; }}
   ul.picklist-values li {{ display: flex; align-items: baseline; gap: 6px; font-size: 12px; line-height: 1.4; }}
   ul.picklist-values .arrow {{ color: var(--text-muted); font-size: 11px; flex-shrink: 0; }}
   ul.picklist-values code {{ font-size: 11px; }}
@@ -992,6 +1171,13 @@ def generate_html(object_name, org_alias, output_dir, explanations_file=None, tr
   }}
   .trigger-note {{ font-size: 12px; color: var(--text-muted); font-style: italic; margin: 2px 0 10px; }}
   .trigger-ctx {{ font-size: 12px; font-weight: 600; color: var(--sec-color); background: var(--sec-bg); white-space: nowrap; }}
+  /* Separación entre los contextos de insert, de update, de delete…: un hueco del
+     color de la página por encima de la primera fila de cada grupo. */
+  table.secondary-table tr.ctx-group-start td {{ border-top: 10px solid var(--surface); }}
+  table.secondary-table tr.ctx-group-start td.trigger-ctx {{ box-shadow: inset 0 1px 0 var(--sec-border); }}
+
+  /* ── Filtro «Solo activos» de flows y reglas de validación ── */
+  .section-toolbar {{ display: flex; align-items: center; gap: 12px; padding: 10px 16px; border-bottom: 1px solid var(--border); }}
 
   /* ── Responsive ── */
   @media (max-width: 900px) {{
@@ -1014,6 +1200,14 @@ def generate_html(object_name, org_alias, output_dir, explanations_file=None, tr
       <div>Requeridos <strong class="badge">{required_count}</strong></div>
       <div>Org: <strong>{escape(org_alias)}</strong></div>
       <div>Generado: <strong>{now}</strong></div>
+    </div>
+    <div class="actualizar" id="actualizar" data-objeto="{escape(object_name)}" data-org="{escape(org_alias)}" hidden>
+      <label>Actualizar desde <select id="act-org" aria-label="Org"></select></label>
+      <button type="button" id="act-boton">Actualizar</button>
+      <span class="actualizar-estado" id="act-estado" role="status" aria-live="polite"></span>
+    </div>
+    <div class="actualizar-nota" id="act-nota" hidden>
+      Para actualizar desde aquí, abre la documentación con su servidor (<code>servir_documentator.py</code>, junto al generador).
     </div>
   </header>
 
@@ -1081,7 +1275,7 @@ def generate_html(object_name, org_alias, output_dir, explanations_file=None, tr
 <script>
 (function() {{
   const searchInput = document.getElementById('search');
-  const filterBtns = document.querySelectorAll('.filter-btn');
+  const filterBtns = document.querySelectorAll('.toolbar .filter-btn');
   const rows = document.querySelectorAll('.field-row');
   const visibleCount = document.getElementById('visible-count');
   let activeFilter = 'all';
@@ -1165,6 +1359,8 @@ def generate_html(object_name, org_alias, output_dir, explanations_file=None, tr
   }});
 }})();
 </script>
+<script>{ACTIVE_FILTER_SCRIPT}</script>
+<script>{UPDATE_SCRIPT}</script>
 </body>
 </html>'''
 
@@ -1187,6 +1383,24 @@ def generate_html(object_name, org_alias, output_dir, explanations_file=None, tr
 
 
 if __name__ == '__main__':
+    # Solo la etiqueta y las fórmulas del objeto, en JSON: el describe entero no cabe
+    # en la salida de una herramienta y llega truncado, y con él no se pueden comparar
+    # las fórmulas con el caché.
+    if len(sys.argv) == 4 and sys.argv[1] == '--formulas':
+        describe = run_sf_describe(sys.argv[2], sys.argv[3])['result']
+        sys.stdout.reconfigure(encoding='utf-8')
+        print(json.dumps({
+            'label': describe.get('label'),
+            'formulas': {f['name']: f.get('calculatedFormula') for f in describe['fields'] if f.get('calculated')},
+        }, ensure_ascii=False, indent=1))
+        sys.exit(0)
+
+    if sys.argv[1:] == ['--indice']:
+        out = os.path.join(os.getcwd(), 'documentator')
+        os.makedirs(out, exist_ok=True)
+        write_index(out)
+        sys.exit(0)
+
     if len(sys.argv) < 3:
         print("Uso: python sf_doc_generator.py <ObjectApiName> <OrgAlias> "
               "[explanations.json] [triggers.json] [flow_descriptions.json] [review.json]")
@@ -1203,3 +1417,17 @@ if __name__ == '__main__':
 
     generate_html(obj_name, org, out, explanations_file=explanations_file, triggers_file=triggers_file,
                   flow_desc_file=flow_desc_file, review_file=review_file)
+
+    # Los temporales los borra el generador y no quien lo llama: en el modo no
+    # interactivo cada forma de escribir el borrado es un permiso más que acertar.
+    # Solo los de la raíz de documentator/ que empiezan por «_»: los cachés viven en
+    # el subdirectorio del objeto y no se tocan.
+    for temp in [explanations_file, triggers_file, flow_desc_file, review_file,
+                 os.path.join(out, '_tmp_flows.xml')]:
+        # samefile y no comparar rutas: en Windows la misma carpeta puede llegar con
+        # su nombre corto (VCTORS~1) o el largo.
+        if temp and os.path.isfile(temp) and os.path.basename(temp).startswith('_') \
+                and os.path.samefile(os.path.dirname(os.path.abspath(temp)), out):
+            os.remove(temp)
+    shutil.rmtree(os.path.join(out, '.tmp_flows'), ignore_errors=True)
+    print("Temporales borrados.")
