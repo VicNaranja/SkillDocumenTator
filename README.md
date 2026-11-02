@@ -88,7 +88,13 @@ y abrir `http://127.0.0.1:8788/`. Las páginas de objeto se pueden abrir tambié
 
 > Abre [`docs/demo.html`](docs/demo.html) en cualquier navegador para probar una página de objeto con el objeto ficticio `PetClinic__c`, sin servidor ni org de Salesforce. Es de una versión anterior: no tiene el botón Actualizar ni los filtros de activos.
 
-Las capturas también son de la versión anterior de la página de objeto.
+### Gestión de usuarios — página en vivo
+
+Con nombres, usuarios, correos, perfiles y org ficticios.
+
+![Gestión de usuarios](docs/screenshots/usuarios.png)
+
+Las capturas de la página de objeto que siguen son de la versión anterior.
 
 ### Tabla de campos — búsqueda, filtros y copia de API names
 
