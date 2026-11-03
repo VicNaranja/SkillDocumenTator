@@ -23,7 +23,7 @@ Skill para Claude Code que genera documentación HTML interactiva de cualquier o
 Consultan el org en cada carga y no guardan nada en disco, porque muestran datos de usuarios. Tienen un selector de org con los alias autenticados en la CLI, que recuerda el último elegido y marca `PRODUCCIÓN` cuando el org no es un sandbox (lo pregunta al org, no lo deduce del alias).
 
 - **Gestión de usuarios** (`userList`) — listado de usuarios con filtros acumulables y columnas a elegir, exportación, asignar y quitar permission sets y permission set groups (la única escritura en el org, con confirmación), visor de permission set groups y visor de permission sets y perfiles.
-- **Licencias** (`userLicence`) — licencias de usuario, de permission set y de paquetes instalados con su uso, y usuarios activos por licencia y por perfil, con los que no entran desde hace 90 días.
+- **Licencias** (`userLicence`) — licencias de usuario, de funcionalidad (Service Cloud User, Knowledge User…), de permission set y de paquetes instalados con su uso, y usuarios activos por licencia y por perfil, con los que no entran desde hace 90 días.
 - **Flows** (`flows`) — todos los flows del org con filtros, buscador y ordenación.
 
 ## Requisitos

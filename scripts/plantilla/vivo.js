@@ -2023,6 +2023,7 @@ function renderLicencias(seccion) {
   const activos = porLicencia.reduce(function (s, f) { return s + (Number(f.activos) || 0); }, 0);
   const sinLogin = porLicencia.reduce(function (s, f) { return s + (Number(f.sinLogin) || 0); }, 0);
   const usuario = (seccion.usuario || []).filter(function (f) { return f.total > 0 || f.usadas > 0; });
+  const funcionalidad = (seccion.funcionalidad || []).filter(function (f) { return f.total > 0 || f.asignadas > 0; });
   const permissionSet = (seccion.permissionSet || []).filter(function (f) { return f.total > 0 || f.usadas > 0; });
   const paquete = seccion.paquete || [];
 
@@ -2030,6 +2031,7 @@ function renderLicencias(seccion) {
     { etiqueta: 'Usuarios activos', valor: num(activos), pie: 'todos los tipos de usuario' },
     { etiqueta: 'Activos sin entrar en ' + dias + ' días', valor: num(sinLogin), pie: pct(sinLogin, activos) + ' de los activos, incluidos los que nunca han entrado' },
     { etiqueta: 'Licencias de usuario', valor: num(usuario.length), pie: 'con algún total o alguna usada' },
+    { etiqueta: 'Licencias de funcionalidad', valor: num(funcionalidad.length), pie: 'con algún total o alguna asignada' },
     { etiqueta: 'Licencias de permission set', valor: num(permissionSet.length), pie: 'con algún total o alguna usada' },
     { etiqueta: 'Licencias de paquetes', valor: num(paquete.length), pie: 'una por fila de PackageLicense' }
   ];
@@ -2063,6 +2065,28 @@ function renderLicencias(seccion) {
           ]);
         }))
       : vacio('Sin licencias de usuario', 'El org no devuelve ninguna licencia de usuario con total o uso.')
+  ]));
+
+  contenedor.appendChild(el('div', { className: 'tarjeta' }, [
+    el('h3', {}, ['Licencias de funcionalidad']),
+    el('p', { className: 'nota' }, [
+      'Se suman a la licencia de usuario marcando una casilla en el usuario, como Service Cloud User o Knowledge User. ' +
+      'Asignadas son los usuarios activos que la tienen; activas, los de ellos que han entrado hace poco: Salesforce no ' +
+      'documenta el plazo, y en el org donde se comprobó eran los últimos 30 días. Salesforce las recuenta una vez por semana' +
+      (seccion.funcionalidadFecha ? '; este es el recuento del ' + fechaLicencia(seccion.funcionalidadFecha) + '.' : '.')
+    ]),
+    funcionalidad.length
+      ? tablaLicencias(['Licencia', 'Total', 'Asignadas', 'Disponibles', 'Uso', 'Activas'], funcionalidad.map(function (f) {
+          return el('tr', {}, [
+            el('td', {}, [f.nombre]),
+            el('td', { className: 'num' }, [num(f.total)]),
+            el('td', { className: 'num' }, [num(f.asignadas)]),
+            el('td', { className: 'num' }, [num(f.total - f.asignadas)]),
+            celdaUso(f.asignadas, f.total),
+            el('td', { className: 'num' }, [num(f.activas)])
+          ]);
+        }))
+      : vacio('Sin licencias de funcionalidad', 'El org no devuelve ninguna licencia de funcionalidad con total o asignadas.')
   ]));
 
   contenedor.appendChild(el('div', { className: 'rejilla-2' }, [

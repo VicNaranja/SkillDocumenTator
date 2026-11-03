@@ -1,6 +1,7 @@
 """
-Seccion "Licencias": estado de las licencias del org — de usuario, de permission
-set y de paquetes instalados — y como se reparten los usuarios activos.
+Seccion "Licencias": estado de las licencias del org — de usuario, de
+funcionalidad, de permission set y de paquetes instalados — y como se reparten
+los usuarios activos.
 
 Todo son consultas de lectura que se lanzan en paralelo al abrir la pagina.
 
@@ -16,9 +17,18 @@ Gotchas de los objetos, comprobados contra un org:
 - `PackageLicense.AllowedLicenses = -1` no esta documentado; se observa en los
   paquetes con licencia de sitio o gratuitos. No trae el nombre del paquete,
   solo el namespace, que ademas se repite.
+- Las licencias de funcionalidad (Service Cloud User, Knowledge User...) no
+  estan en `UserLicense` ni en `PermissionSetLicense`. Su total solo sale de
+  `ActiveFeatureLicenseMetric`, que es una foto semanal: se usa la mas reciente.
+  Quien la tiene es la casilla `UserPermissions<FeatureType>` del usuario.
+- En `ActiveFeatureLicenseMetric`, `AssignedUserCount` coincide con los usuarios
+  activos con la casilla marcada, y `ActiveUserCount` con los de ellos que han
+  entrado en los ultimos 30 dias. Salesforce no documenta ese plazo; es lo que
+  se observa en un org.
 """
 
 import concurrent.futures
+import re
 
 ID = "licencias"
 TITULO = "Licencias"
@@ -27,6 +37,17 @@ TITULO = "Licencias"
 DIAS_SIN_LOGIN = 90
 
 SIN_LOGIN = "(LastLoginDate < LAST_N_DAYS:{} OR LastLoginDate = null)".format(DIAS_SIN_LOGIN)
+
+# Nombre de cada FeatureType como lo etiqueta su casilla en User; los demas se
+# separan por mayusculas ("ChatterAnswersUser" -> "Chatter Answers User").
+NOMBRES_FUNCIONALIDAD = {
+    "SupportUser": "Service Cloud User",
+    "MarketingUser": "Marketing User",
+    "KnowledgeUser": "Knowledge User",
+    "OfflineUser": "Offline User",
+    "SFContentUser": "Salesforce CRM Content User",
+    "InteractionUser": "Flow User",
+}
 
 
 def _licencias_usuario(org):
@@ -44,6 +65,26 @@ def _licencias_usuario(org):
             "actualizado": f.get("UsedLicensesLastUpdated"),
         }
         for f in filas
+    ]
+
+
+def _licencias_funcionalidad(org):
+    """Las filas de la foto mas reciente de ActiveFeatureLicenseMetric."""
+    filas = org.consultar(
+        "SELECT FeatureType, TotalLicenseCount, AssignedUserCount, ActiveUserCount, MetricsDate "
+        "FROM ActiveFeatureLicenseMetric ORDER BY MetricsDate DESC"
+    )
+    fecha = filas[0].get("MetricsDate") if filas else None
+    return fecha, [
+        {
+            "nombre": NOMBRES_FUNCIONALIDAD.get(f.get("FeatureType"))
+            or re.sub(r"(?<=[a-z])(?=[A-Z])", " ", f.get("FeatureType") or ""),
+            "total": f.get("TotalLicenseCount") or 0,
+            "asignadas": f.get("AssignedUserCount") or 0,
+            "activas": f.get("ActiveUserCount") or 0,
+        }
+        for f in filas
+        if f.get("MetricsDate") == fecha
     ]
 
 
@@ -103,6 +144,7 @@ def recoger(org):
 
     tareas = {
         "usuario": lambda: _licencias_usuario(org),
+        "funcionalidad": lambda: _licencias_funcionalidad(org),
         "permissionSet": lambda: _licencias_permission_set(org),
         "paquete": lambda: _licencias_paquete(org),
         "activosPorLicencia": lambda: _por_licencia(org, ""),
@@ -143,6 +185,8 @@ def recoger(org):
     for licencia in usuario:
         del licencia["id"]
 
+    fecha_funcionalidad, funcionalidad = r["funcionalidad"]
+
     return {
         "id": ID,
         "titulo": TITULO,
@@ -153,6 +197,8 @@ def recoger(org):
         ),
         "diasSinLogin": DIAS_SIN_LOGIN,
         "usuario": usuario,
+        "funcionalidad": sorted(funcionalidad, key=lambda f: (-f["asignadas"], -f["total"], f["nombre"])),
+        "funcionalidadFecha": fecha_funcionalidad,
         "permissionSet": sorted(r["permissionSet"], key=lambda f: (-f["usadas"], -f["total"], f["nombre"] or "")),
         "paquete": r["paquete"],
         "porLicencia": por_licencia,
