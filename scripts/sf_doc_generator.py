@@ -613,6 +613,14 @@ def write_index(output_dir, manifest=None):
         for href, title, desc in LIVE_PAGES
     )
 
+    # Ruta del servidor desde la raíz del proyecto, que es desde donde se lanza.
+    server_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'servir_documentator.py')
+    try:
+        server_path = os.path.relpath(server_path, os.path.dirname(os.path.abspath(output_dir)))
+    except ValueError:  # En otra unidad no hay ruta relativa.
+        pass
+    server_command = f'python {server_path} --org <alias>'
+
     rows = ''
     for e in manifest:
         rows += (
@@ -657,6 +665,8 @@ def write_index(output_dir, manifest=None):
   .live {{ margin-top: 24px; background: var(--surface); box-shadow: 0 1px 3px rgba(0,0,0,0.1); border-radius: 8px; overflow: hidden; }}
   .live h2 {{ background: linear-gradient(135deg, #0070d2, #1589ee); color: #fff; padding: 12px 24px; font-size: 15px; font-weight: 700; }}
   .live ul {{ list-style: none; display: grid; gap: 8px; padding: 16px 24px; }}
+  .servidor {{ padding: 0 24px 16px; color: var(--text-muted); font-size: 13px; }}
+  .servidor code {{ display: block; margin-top: 6px; padding: 8px 12px; background: var(--surface2); border: 1px solid var(--border); border-radius: 6px; color: var(--text); font-size: 12px; user-select: all; overflow-wrap: anywhere; }}
 </style>
 </head>
 <body>
@@ -679,9 +689,14 @@ def write_index(output_dir, manifest=None):
   <section class="live">
     <h2>Salesforce Configuration</h2>
     <ul>{live}</ul>
+    <div class="servidor" id="servidor" hidden>
+      Abierto desde el disco, estas páginas no cargan. Arranca el servidor desde la raíz del proyecto:
+      <code>{escape(server_command)}</code>
+    </div>
   </section>
 </div>
 <script>
+if(location.protocol==='file:')document.getElementById('servidor').hidden=false;
 (function(){{
   var btn=document.getElementById('dm-toggle'),root=document.documentElement;
   if(root.getAttribute('data-theme')==='dark')btn.textContent='☀️';
