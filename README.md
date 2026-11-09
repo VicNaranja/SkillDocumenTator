@@ -1,6 +1,6 @@
 # documentar-objeto
 
-Skill para Claude Code que genera documentación HTML interactiva de cualquier objeto Salesforce —campos, valores picklist, explicaciones de fórmulas, reglas de validación, flows, triggers Apex y observaciones a revisar— y la sirve en local con un botón para actualizarla desde el org que elijas. El mismo servidor abre tres páginas que consultan el org en vivo: gestión de usuarios, licencias y flows.
+Skill para Claude Code que genera documentación HTML interactiva de cualquier objeto Salesforce —campos, valores picklist, explicaciones de fórmulas, reglas de validación, flows, triggers Apex y observaciones a revisar— y la sirve en local con un botón para actualizarla desde el org que elijas. El mismo servidor abre cuatro páginas que consultan el org: gestión de usuarios, licencias, flows y Omni-Channel.
 
 ## Características
 
@@ -20,11 +20,12 @@ Skill para Claude Code que genera documentación HTML interactiva de cualquier o
 
 ### Páginas en vivo (Salesforce Configuration)
 
-Consultan el org en cada carga y no guardan nada en disco, porque muestran datos de usuarios. Tienen un selector de org con los alias autenticados en la CLI, que recuerda el último elegido y marca `PRODUCCIÓN` cuando el org no es un sandbox (lo pregunta al org, no lo deduce del alias).
+Consultan el org en cada carga y no guardan nada en disco, porque muestran datos de usuarios; la de Omni-Channel es la excepción (ver abajo). Tienen un selector de org con los alias autenticados en la CLI, que recuerda el último elegido y marca `PRODUCCIÓN` cuando el org no es un sandbox (lo pregunta al org, no lo deduce del alias).
 
 - **Gestión de usuarios** (`userList`) — listado de usuarios con filtros acumulables y columnas a elegir, exportación, asignar y quitar permission sets y permission set groups (la única escritura en el org, con confirmación), visor de permission set groups y visor de permission sets y perfiles.
 - **Licencias** (`userLicence`) — licencias de usuario, de funcionalidad (Service Cloud User, Knowledge User…), de permission set y de paquetes instalados con su uso, y usuarios activos por licencia y por perfil, con los que no entran desde hace 90 días.
 - **Flows** (`flows`) — todos los flows del org con filtros, buscador y ordenación.
+- **Omni-Channel** (`omnichannel`) — la configuración de Omni-Channel de forma visual: una pestaña General con los ajustes, un mapa de enrutamiento (canal de mensajería → flow → cola o agente de IA → canal de servicio), presencia, estados y supervisión; y una pestaña por canal con el recorrido del trabajo hasta los agentes, los canales de mensajería, la configuración de cada cola y el diagrama de cada flow que lo enruta. Es la única que se guarda en disco (`documentator/_vivo/`): enseña lo último consultado y **Actualizar** vuelve al org.
 
 ## Requisitos
 
@@ -66,6 +67,7 @@ Desde la raíz de un proyecto Salesforce:
 /documentar-objeto userList <AliasOrg>              # abre la gestión de usuarios
 /documentar-objeto userLicence <AliasOrg>           # abre el panel de licencias
 /documentar-objeto flows <AliasOrg>                 # abre el visor de flows
+/documentar-objeto omnichannel <AliasOrg>           # abre la configuración de Omni-Channel
 ```
 
 Claude arranca el servidor si no está levantado y abre la página en el navegador. También se puede arrancar a mano:
@@ -137,7 +139,8 @@ documentar-objeto/
     │   ├── __init__.py             # Qué secciones lleva cada página
     │   ├── usuarios.py, visor_grupos.py, visor_permisos.py
     │   ├── licencias.py
-    │   └── visor_flows.py
+    │   ├── visor_flows.py
+    │   └── omnichannel.py
     └── plantilla/                  # HTML, CSS y JS de las páginas en vivo
 ```
 

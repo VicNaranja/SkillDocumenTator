@@ -3,7 +3,8 @@ Acceso a un org de Salesforce para las paginas en vivo del documentator.
 
 Casi todo es lectura. Las unicas escrituras son `Org.crear_registros` y
 `Org.borrar_registros`, con las que la gestion de usuarios asigna y quita
-permisos.
+permisos. La Metadata API se usa solo para leer (`Org.leer_metadata`), con lo
+que la API REST no da.
 
 La CLI `sf` se usa una unica vez por org, para tomar prestado el token de la
 sesion que ya tiene abierta; a partir de ahi las consultas van directas a la
@@ -20,9 +21,48 @@ import subprocess
 import urllib.error
 import urllib.parse
 import urllib.request
+import xml.etree.ElementTree as ET
+from xml.sax.saxutils import escape
 
 API_POR_DEFECTO = "v62.0"
 TIMEOUT = 120
+
+# readMetadata no admite mas nombres por llamada.
+METADATA_POR_LLAMADA = 10
+
+SOBRE_METADATA = (
+    '<?xml version="1.0" encoding="utf-8"?>'
+    '<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" '
+    'xmlns:met="http://soap.sforce.com/2006/04/metadata">'
+    "<soapenv:Header><met:SessionHeader><met:sessionId>{token}</met:sessionId></met:SessionHeader></soapenv:Header>"
+    "<soapenv:Body><met:readMetadata><met:type>{tipo}</met:type>{nombres}</met:readMetadata></soapenv:Body>"
+    "</soapenv:Envelope>"
+)
+
+
+def _sin_espacio(etiqueta):
+    return etiqueta.rsplit("}", 1)[-1]
+
+
+def _a_dict(nodo):
+    """
+    Un elemento XML de la Metadata API como dict: los hijos que se repiten son
+    listas y las hojas, su texto. Los tipos no se interpretan: todo es texto.
+    """
+    hijos = list(nodo)
+    if not hijos:
+        return nodo.text or ""
+    resultado = {}
+    for hijo in hijos:
+        clave = _sin_espacio(hijo.tag)
+        valor = _a_dict(hijo)
+        if clave in resultado:
+            if not isinstance(resultado[clave], list):
+                resultado[clave] = [resultado[clave]]
+            resultado[clave].append(valor)
+        else:
+            resultado[clave] = valor
+    return resultado
 
 # Lo que no cambia entre peticiones se guarda mientras viva el servidor: la
 # sesion del org y el describe de cada objeto (que es un payload grande y caro).
@@ -252,6 +292,46 @@ class Org:
             ruta = "composite/sobjects?allOrNone=false&ids=" + ",".join(ids[inicio:inicio + 200])
             resultados.extend(self._enviar("DELETE", ruta))
         return resultados
+
+    def leer_metadata(self, tipo, nombres, reintentado=False):
+        """
+        Componentes de metadata por su fullName, con readMetadata de la Metadata
+        API (SOAP), en lotes de 10. Devuelve un dict por componente que exista;
+        los que no existen no salen.
+
+        Es para lo que no esta en ningun sObject, como los ajustes de un org o la
+        gestion de sesiones de un canal de mensajeria.
+        """
+        url_base, token, api = self._sesion()
+        registros = []
+        for inicio in range(0, len(nombres), METADATA_POR_LLAMADA):
+            lote = nombres[inicio:inicio + METADATA_POR_LLAMADA]
+            sobre = SOBRE_METADATA.format(
+                token=escape(token),
+                tipo=escape(tipo),
+                nombres="".join("<met:fullNames>{}</met:fullNames>".format(escape(n)) for n in lote),
+            )
+            peticion = urllib.request.Request(
+                url_base + "/services/Soap/m/" + api.lstrip("v"),
+                data=sobre.encode("utf-8"),
+                headers={"Content-Type": "text/xml; charset=utf-8", "SOAPAction": '""'},
+            )
+            try:
+                with urllib.request.urlopen(peticion, timeout=TIMEOUT) as respuesta:
+                    raiz = ET.fromstring(respuesta.read())
+            except urllib.error.HTTPError as error:
+                detalle = error.read().decode("utf-8", "replace")
+                # La sesion caducada llega como fallo SOAP, no como 401.
+                if "INVALID_SESSION_ID" in detalle and not reintentado:
+                    self._sesion(renovar=True)
+                    return self.leer_metadata(tipo, nombres, reintentado=True)
+                raise ErrorCli("La Metadata API respondió {} al leer {}:\n{}".format(error.code, tipo, detalle[:600]))
+
+            for nodo in raiz.iter():
+                # Un componente que no existe vuelve como <records xsi:nil="true"/>, vacio.
+                if _sin_espacio(nodo.tag) == "records" and len(nodo):
+                    registros.append(_a_dict(nodo))
+        return registros
 
     def _describe(self, objeto):
         clave = (self.alias, objeto)

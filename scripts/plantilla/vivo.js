@@ -1,8 +1,9 @@
 /* ------------------------------------------------------------------ *
- * Paginas en vivo del documentator: usuarios, licencias y flows.
+ * Paginas en vivo del documentator: usuarios, licencias, flows y Omni-Channel.
  *
  * Cada pagina apila sus secciones bajo un selector de org. Los datos los
- * sirve servir_documentator.py, que consulta el org en cada carga.
+ * sirve servir_documentator.py, que consulta el org en cada carga; la de
+ * Omni-Channel, lo ultimo guardado, salvo con «Actualizar».
  *
  * Para anadir una seccion: registra su funcion en RENDERIZADORES con la
  * misma clave que el ID del modulo Python.
@@ -2169,18 +2170,714 @@ function renderLicencias(seccion) {
   return contenedor;
 }
 
+/* --------------------------- Omni-Channel -------------------------- */
+
+// Pestaña abierta: sobrevive a «Actualizar» y al cambio de org mientras ese canal exista.
+let PESTANA_OMNI = 'general';
+
+const SVG_NS = 'http://www.w3.org/2000/svg';
+
+function svg(etiqueta, atributos, hijos) {
+  const nodo = document.createElementNS(SVG_NS, etiqueta);
+  Object.keys(atributos || {}).forEach(function (clave) { nodo.setAttribute(clave, atributos[clave]); });
+  (hijos || []).forEach(function (hijo) {
+    if (hijo === null || hijo === undefined) return;
+    nodo.appendChild(typeof hijo === 'string' ? document.createTextNode(hijo) : hijo);
+  });
+  return nodo;
+}
+
+function recortar(texto, maximo) {
+  texto = String(texto || '');
+  return texto.length > maximo ? texto.slice(0, maximo - 1) + '…' : texto;
+}
+
+// Color de cada canal por su orden en el org, igual en todos los diagramas. Hay
+// seis; a partir del séptimo, gris: un color nuevo no se distinguiría.
+function colorCanal(indice) {
+  return indice >= 0 && indice < 6 ? 'var(--canal-' + (indice + 1) + ')' : 'var(--estado-neutro)';
+}
+
+/*
+ * Dónde se abre cada pieza en Salesforce. Las colas y los flows tienen ruta propia
+ * en Configuración, y los usuarios su ficha; el resto de la configuración de
+ * Omni-Channel se abre por su Id, que Salesforce resuelve a su página.
+ */
+function urlSalesforce(tipo, id) {
+  if (!DATOS.urlInstancia) return '';
+  if (tipo === 'ajustes') return DATOS.urlInstancia + '/lightning/setup/OmniChannelSettings/home';
+  if (!id) return '';
+  if (tipo === 'usuario') return urlDetalleUsuario(id);
+  // Los flows de paquete no traen Id ("ns__Nombre"): no hay página a la que llevar.
+  if (tipo === 'flow') return /^300/.test(id) ? urlConfiguracion('Flows', id) : '';
+  if (tipo === 'cola') return DATOS.urlInstancia + '/lightning/setup/Queues/page?address=' + encodeURIComponent('/p/own/Queue/d?id=' + id);
+  return DATOS.urlInstancia + '/' + id;
+}
+
+function enlaceSf(texto, tipo, id) {
+  const url = urlSalesforce(tipo, id);
+  return url ? el('a', { href: url, target: '_blank', rel: 'noopener', title: 'Abrir en Salesforce' }, [texto]) : texto;
+}
+
+function siNo(valor) { return valor ? 'Sí' : 'No'; }
+
+function oGuion(valor) { return valor === null || valor === undefined || valor === '' ? '—' : String(valor); }
+
+function leyenda(entradas) {
+  return el('div', { className: 'leyenda' }, entradas.map(function (entrada) {
+    const muestra = el('span', { className: 'leyenda-muestra' });
+    muestra.style.background = entrada.color;
+    return el('span', { className: 'leyenda-entrada' }, [muestra, entrada.etiqueta]);
+  }));
+}
+
+// Pares etiqueta-valor en rejilla. El valor puede ser un nodo (chips, código).
+function ficha(pares) {
+  return el('dl', { className: 'ficha' }, pares.reduce(function (hijos, par) {
+    hijos.push(el('dt', {}, [par[0]]), el('dd', {}, [typeof par[1] === 'string' ? par[1] : (par[1] || '—')]));
+    return hijos;
+  }, []));
+}
+
+function chipsTexto(textos, vacioTexto) {
+  return textos.length
+    ? el('div', { className: 'chips' }, textos.map(function (texto) { return el('span', { className: 'chip' }, [texto]); }))
+    : el('span', { className: 'sin-dato' }, [vacioTexto || '—']);
+}
+
+/*
+ * Diagrama por columnas, de izquierda a derecha: cada columna es una etapa (entrada,
+ * flow, cola, agente) y las curvas unen lo que se entrega de una a otra. Al pasar el
+ * ratón por un nodo se resaltan sus conexiones y el resto se atenúa.
+ *
+ * columnas: [{ titulo, nodos: [{ id, etiqueta, detalle, color, pista }] }]
+ * aristas:  [{ de, a }]
+ */
+function diagramaCapas(columnas, aristas) {
+  const ANCHO = 210, ALTO = 46, HUECO_V = 12, HUECO_H = 84, CABECERA = 26;
+  columnas = columnas.filter(function (c) { return c.nodos.length; });
+
+  // Cada nodo se coloca a la altura media de los que le llegan: menos cruces.
+  const posicion = {};
+  columnas.forEach(function (columna, i) {
+    if (i > 0) {
+      const peso = function (nodo) {
+        const origen = aristas.filter(function (a) { return a.a === nodo.id && posicion[a.de] !== undefined; })
+          .map(function (a) { return posicion[a.de]; });
+        return origen.length ? origen.reduce(function (s, v) { return s + v; }, 0) / origen.length : Infinity;
+      };
+      columna.nodos = columna.nodos.slice().sort(function (x, y) { return peso(x) - peso(y); });
+    }
+    columna.nodos.forEach(function (nodo, j) { posicion[nodo.id] = j; });
+  });
+
+  const filas = Math.max.apply(null, columnas.map(function (c) { return c.nodos.length; }).concat([1]));
+  const alto = CABECERA + filas * (ALTO + HUECO_V);
+  const ancho = columnas.length * ANCHO + (columnas.length - 1) * HUECO_H;
+  const sitio = {};
+  columnas.forEach(function (columna, i) {
+    const desfase = (filas - columna.nodos.length) * (ALTO + HUECO_V) / 2;
+    columna.nodos.forEach(function (nodo, j) {
+      sitio[nodo.id] = { x: i * (ANCHO + HUECO_H), y: CABECERA + desfase + j * (ALTO + HUECO_V) };
+    });
+  });
+
+  const lienzo = svg('svg', { width: ancho, height: alto, viewBox: '0 0 ' + ancho + ' ' + alto, class: 'diagrama-svg', role: 'img' });
+  columnas.forEach(function (columna, i) {
+    lienzo.appendChild(svg('text', { x: i * (ANCHO + HUECO_H), y: 14, class: 'diagrama-columna' }, [columna.titulo]));
+  });
+
+  const curvas = [];
+  aristas.forEach(function (arista) {
+    const a = sitio[arista.de], b = sitio[arista.a];
+    if (!a || !b || b.x <= a.x) return;
+    const x1 = a.x + ANCHO, y1 = a.y + ALTO / 2, x2 = b.x, y2 = b.y + ALTO / 2, medio = (x1 + x2) / 2;
+    const curva = svg('path', {
+      d: 'M' + x1 + ',' + y1 + ' C' + medio + ',' + y1 + ' ' + medio + ',' + y2 + ' ' + x2 + ',' + y2,
+      class: 'diagrama-arista'
+    });
+    curva.dataset.de = arista.de;
+    curva.dataset.a = arista.a;
+    curvas.push(curva);
+    lienzo.appendChild(curva);
+  });
+
+  columnas.forEach(function (columna) {
+    columna.nodos.forEach(function (nodo) {
+      const p = sitio[nodo.id];
+      const grupo = svg('g', { class: 'diagrama-nodo', transform: 'translate(' + p.x + ',' + p.y + ')' }, [
+        svg('rect', { width: ANCHO, height: ALTO, rx: 6, class: 'diagrama-caja' }),
+        svg('rect', { width: 5, height: ALTO, rx: 2, fill: nodo.color || 'var(--estado-neutro)' }),
+        svg('text', { x: 14, y: nodo.detalle ? 19 : 28, class: 'diagrama-etiqueta' }, [recortar(nodo.etiqueta, 27)]),
+        nodo.detalle ? svg('text', { x: 14, y: 35, class: 'diagrama-detalle' }, [recortar(nodo.detalle, 32)]) : null
+      ]);
+      conPista(grupo, (nodo.pista || [nodo.etiqueta, nodo.detalle].filter(Boolean).join(' — ')) +
+        (nodo.url ? ' · clic para abrir en Salesforce' : ''));
+      if (nodo.url) {
+        grupo.classList.add('enlazado');
+        grupo.addEventListener('click', function () { window.open(nodo.url, '_blank', 'noopener'); });
+      }
+      grupo.addEventListener('mouseenter', function () {
+        lienzo.classList.add('enfocado');
+        curvas.forEach(function (curva) {
+          curva.classList.toggle('activa', curva.dataset.de === nodo.id || curva.dataset.a === nodo.id);
+        });
+      });
+      grupo.addEventListener('mouseleave', function () {
+        lienzo.classList.remove('enfocado');
+        curvas.forEach(function (curva) { curva.classList.remove('activa'); });
+      });
+      lienzo.appendChild(grupo);
+    });
+  });
+
+  return el('div', { className: 'diagrama' }, [lienzo]);
+}
+
+// Color de cada tipo de elemento de un flow; lo que no está aquí, gris.
+const TIPOS_ELEMENTO_FLOW = [
+  { clave: 'start', etiqueta: 'Inicio', color: 'var(--canal-3)' },
+  { clave: 'routeWork', etiqueta: 'Enrutar trabajo', color: 'var(--canal-1)' },
+  { clave: 'decisions', etiqueta: 'Decisión', color: 'var(--canal-4)' },
+  { clave: 'registros', etiqueta: 'Buscar, crear o actualizar registros', color: 'var(--canal-2)' },
+  { clave: 'subflows', etiqueta: 'Subflow', color: 'var(--canal-6)' },
+  { clave: 'otros', etiqueta: 'Otros', color: 'var(--estado-neutro)' }
+];
+
+function colorElementoFlow(nodo) {
+  if (nodo.tipoEtiqueta === 'Enrutar trabajo') return 'var(--canal-1)';
+  if (nodo.tipo === 'start') return 'var(--canal-3)';
+  if (nodo.tipo === 'decisions') return 'var(--canal-4)';
+  if (/^record/.test(nodo.tipo)) return 'var(--canal-2)';
+  if (nodo.tipo === 'subflows') return 'var(--canal-6)';
+  return 'var(--estado-neutro)';
+}
+
+/*
+ * Un flow de arriba abajo, como en Flow Builder: cada fila es la distancia desde el
+ * inicio. Las conexiones que vuelven hacia arriba (bucles) van por la derecha, a trazos.
+ */
+function diagramaFlow(grafo) {
+  const ANCHO = 172, ALTO = 40, HUECO_H = 26, HUECO_V = 52;
+  const salidas = {};
+  grafo.aristas.forEach(function (a) { (salidas[a.de] = salidas[a.de] || []).push(a.a); });
+
+  const nivel = { __inicio__: 0 };
+  const cola = ['__inicio__'];
+  while (cola.length) {
+    const actual = cola.shift();
+    (salidas[actual] || []).forEach(function (siguiente) {
+      if (nivel[siguiente] === undefined) { nivel[siguiente] = nivel[actual] + 1; cola.push(siguiente); }
+    });
+  }
+  const ultimo = Math.max.apply(null, Object.keys(nivel).map(function (k) { return nivel[k]; }));
+  // Lo que no cuelga del inicio (elementos sueltos) va al final.
+  grafo.nodos.forEach(function (n) { if (nivel[n.id] === undefined) nivel[n.id] = ultimo + 1; });
+
+  const filas = [];
+  grafo.nodos.forEach(function (n) { (filas[nivel[n.id]] = filas[nivel[n.id]] || []).push(n); });
+  const columnaDe = {};
+  filas.forEach(function (fila, i) {
+    if (!fila) return;
+    if (i > 0) {
+      const peso = function (n) {
+        const padres = grafo.aristas.filter(function (a) { return a.a === n.id && columnaDe[a.de] !== undefined && nivel[a.de] < i; })
+          .map(function (a) { return columnaDe[a.de]; });
+        return padres.length ? padres.reduce(function (s, v) { return s + v; }, 0) / padres.length : Infinity;
+      };
+      fila.sort(function (x, y) { return peso(x) - peso(y); });
+    }
+    fila.forEach(function (n, j) { columnaDe[n.id] = j - (fila.length - 1) / 2; });
+  });
+
+  const maximo = Math.max.apply(null, filas.map(function (f) { return f ? f.length : 0; }));
+  const ancho = maximo * ANCHO + (maximo - 1) * HUECO_H + 60;
+  const alto = filas.length * (ALTO + HUECO_V);
+  const centro = (ancho - 60) / 2;
+  const sitio = {};
+  grafo.nodos.forEach(function (n) {
+    sitio[n.id] = { x: centro + columnaDe[n.id] * (ANCHO + HUECO_H) - ANCHO / 2, y: nivel[n.id] * (ALTO + HUECO_V) };
+  });
+
+  const lienzo = svg('svg', { width: ancho, height: alto, viewBox: '0 0 ' + ancho + ' ' + alto, class: 'diagrama-svg', role: 'img' });
+  const etiquetas = [];
+  grafo.aristas.forEach(function (arista) {
+    const a = sitio[arista.de], b = sitio[arista.a];
+    if (!a || !b) return;
+    let d, mx, my;
+    if (b.y === a.y) {
+      // En la misma fila: recta de lado a lado.
+      const izquierda = b.x > a.x;
+      const x1 = izquierda ? a.x + ANCHO : a.x, x2 = izquierda ? b.x : b.x + ANCHO, y = a.y + ALTO / 2;
+      d = 'M' + x1 + ',' + y + ' L' + x2 + ',' + y;
+      mx = (x1 + x2) / 2; my = y - 12;
+    } else if (b.y > a.y) {
+      const x1 = a.x + ANCHO / 2, y1 = a.y + ALTO, x2 = b.x + ANCHO / 2, y2 = b.y, medio = (y1 + y2) / 2;
+      d = 'M' + x1 + ',' + y1 + ' C' + x1 + ',' + medio + ' ' + x2 + ',' + medio + ' ' + x2 + ',' + y2;
+      mx = (x1 + x2) / 2; my = medio;
+    } else {
+      const x1 = a.x + ANCHO, y1 = a.y + ALTO / 2, x2 = b.x + ANCHO, y2 = b.y + ALTO / 2, fuera = Math.max(x1, x2) + 40;
+      d = 'M' + x1 + ',' + y1 + ' C' + fuera + ',' + y1 + ' ' + fuera + ',' + y2 + ' ' + x2 + ',' + y2;
+      mx = fuera - 10; my = (y1 + y2) / 2;
+    }
+    lienzo.appendChild(svg('path', {
+      d: d, class: 'diagrama-arista' + (b.y >= a.y ? '' : ' vuelta') + (arista.fallo ? ' fallo' : '')
+    }));
+    if (arista.etiqueta) etiquetas.push({ x: mx, y: my, texto: recortar(arista.etiqueta, 22) });
+  });
+
+  grafo.nodos.forEach(function (n) {
+    const p = sitio[n.id];
+    // Inicio y fin no tienen más nombre que su tipo: una sola línea.
+    const extremo = n.tipo === 'start' || n.tipo === 'ends';
+    const grupo = svg('g', { class: 'diagrama-nodo', transform: 'translate(' + p.x + ',' + p.y + ')' }, [
+      svg('rect', { width: ANCHO, height: ALTO, rx: extremo ? 20 : 6, class: 'diagrama-caja' + (n.tipoEtiqueta === 'Enrutar trabajo' ? ' destacada' : '') }),
+      svg('rect', { width: 5, height: ALTO, rx: 2, fill: colorElementoFlow(n) }),
+      extremo
+        ? svg('text', { x: 13, y: 25, class: 'diagrama-etiqueta' }, [n.tipoEtiqueta])
+        : svg('text', { x: 13, y: 17, class: 'diagrama-etiqueta' }, [recortar(n.etiqueta, 23)]),
+      extremo ? null : svg('text', { x: 13, y: 32, class: 'diagrama-detalle' }, [n.tipoEtiqueta])
+    ]);
+    conPista(grupo, extremo ? n.tipoEtiqueta : n.etiqueta + ' — ' + n.tipoEtiqueta);
+    lienzo.appendChild(grupo);
+  });
+
+  // Las etiquetas van encima de todo, con fondo, para que una curva no las tache.
+  etiquetas.forEach(function (e) {
+    const texto = svg('text', { x: e.x, y: e.y + 4, class: 'diagrama-condicion', 'text-anchor': 'middle' }, [e.texto]);
+    const fondo = svg('rect', { x: e.x - e.texto.length * 3.1 - 5, y: e.y - 8, width: e.texto.length * 6.2 + 10, height: 16, rx: 4, class: 'diagrama-condicion-fondo' });
+    lienzo.append(fondo, texto);
+  });
+
+  return el('div', { className: 'diagrama diagrama-flow' }, [lienzo]);
+}
+
+function kpisEnFila(kpis) {
+  const rejilla = el('div', { className: 'kpis en-fila' }, kpis.map(function (kpi) {
+    return el('div', { className: 'kpi' }, [
+      el('div', { className: 'kpi-etiqueta' }, [kpi.etiqueta]),
+      el('div', { className: 'kpi-valor' + (kpi.texto ? ' texto' : '') }, [kpi.valor]),
+      el('div', { className: 'kpi-pie' }, [kpi.pie || ''])
+    ]);
+  }));
+  rejilla.style.setProperty('--columnas', kpis.length);
+  return rejilla;
+}
+
+function listaRevisar(entradas, vacioTexto) {
+  return entradas.length
+    ? el('ul', { className: 'revisar' }, entradas.map(function (e) { return el('li', {}, [e.texto]); }))
+    : vacio('Nada que revisar', vacioTexto);
+}
+
+// Miembros distintos de esas colas: usuarios y, aparte, grupos o roles (que no se abren).
+function miembrosEnColas(seccion, idsColas, usuarios) {
+  const nombres = {};
+  idsColas.forEach(function (id) {
+    (seccion.colas[id].miembros || []).forEach(function (m) {
+      if ((m.tipo === 'Usuario') === usuarios) nombres[m.tipo + ':' + m.nombre] = true;
+    });
+  });
+  return Object.keys(nombres).length;
+}
+
+function pieMiembros(seccion, idsColas) {
+  const grupos = miembrosEnColas(seccion, idsColas, false);
+  return 'miembros directos' + (grupos ? '; además, ' + num(grupos) + (grupos === 1 ? ' grupo o rol' : ' grupos o roles') : '');
+}
+
+function indiceCanal(seccion, idsColas, idFlow, idMensajeria) {
+  return seccion.canales.findIndex(function (c) {
+    return (idsColas && idsColas.some(function (id) { return c.colas.indexOf(id) !== -1; })) ||
+      (idFlow && c.flows.indexOf(idFlow) !== -1) || (idMensajeria && c.mensajeria.indexOf(idMensajeria) !== -1);
+  });
+}
+
+function flowPorId(seccion, id) {
+  return seccion.flows.find(function (f) { return f.id === id; });
+}
+
+function mensajeriaPorId(seccion, id) {
+  return seccion.mensajeria.find(function (m) { return m.id === id; });
+}
+
+function omniGeneral(seccion, abrir) {
+  const contenedor = document.createDocumentFragment();
+  const dias = seccion.diasActividad;
+  const idsColas = Array.from(new Set([].concat.apply([], seccion.canales.map(function (c) { return c.colas; }))));
+  const flowsEnCanal = new Set([].concat.apply([], seccion.canales.map(function (c) { return c.flows; })));
+  const activos = seccion.flows.filter(function (f) { return f.activo; }).length;
+
+  contenedor.appendChild(kpisEnFila([
+    { etiqueta: 'Canales de servicio', valor: num(seccion.canales.length), pie: seccion.canales.map(function (c) { return c.objetoEtiqueta; }).join(', ') },
+    { etiqueta: 'Colas en los canales', valor: num(idsColas.length), pie: 'con configuración de enrutamiento o destino de un flow' },
+    { etiqueta: 'Flows de Omni-Channel', valor: num(seccion.flows.length), pie: num(activos) + ' activos' },
+    { etiqueta: 'Canales de mensajería', valor: num(seccion.mensajeria.length), pie: num(seccion.mensajeria.filter(function (m) { return m.activo; }).length) + ' activos' },
+    { etiqueta: 'Usuarios en las colas', valor: num(miembrosEnColas(seccion, idsColas, true)), pie: pieMiembros(seccion, idsColas) },
+    { etiqueta: 'Trabajo asignado', valor: num(seccion.canales.reduce(function (s, c) { return s + c.trabajo; }, 0)), pie: 'últimos ' + dias + ' días, todos los canales' }
+  ]));
+
+  contenedor.appendChild(el('div', { className: 'tarjeta' }, [
+    el('h3', {}, ['Ajustes de Omni-Channel']),
+    el('p', { className: 'nota' }, ['Lo que está activado para todo el org en ', enlaceSf('Setup → Omni-Channel Settings', 'ajustes'), '.']),
+    el('div', { className: 'chips' }, seccion.ajustes.map(function (a) {
+      return el('span', { className: 'chip ajuste' + (a.activo ? ' activo' : '') }, [el('span', { className: 'ajuste-marca' }, [a.activo ? '✓' : '✕']), a.etiqueta]);
+    }))
+  ]));
+
+  // Mapa de todo el org: de dónde entra el trabajo hasta el canal que lo sirve.
+  const nodosMensajeria = seccion.mensajeria.map(function (m) {
+    return { id: 'm:' + m.id, etiqueta: m.nombre, detalle: m.tipo + (m.activo ? '' : ' · inactivo'), color: colorCanal(indiceCanal(seccion, null, null, m.id)), url: urlSalesforce('mensajeria', m.id) };
+  });
+  const nodosFlow = seccion.flows.filter(function (f) { return flowsEnCanal.has(f.id); }).map(function (f) {
+    return { id: 'f:' + f.id, etiqueta: f.etiqueta, detalle: f.activo ? 'Flow activo' : 'Flow inactivo', color: colorCanal(indiceCanal(seccion, null, f.id)), url: urlSalesforce('flow', f.id) };
+  });
+  const destinos = [], aristas = [];
+  idsColas.forEach(function (id) {
+    const c = seccion.colas[id];
+    destinos.push({ id: 'q:' + id, etiqueta: c.nombre, detalle: 'Cola · ' + num(c.miembros.length) + ' miembros', color: colorCanal(indiceCanal(seccion, [id])), url: urlSalesforce('cola', id) });
+  });
+  seccion.mensajeria.forEach(function (m) {
+    if (m.flow) aristas.push({ de: 'm:' + m.id, a: 'f:' + m.flow });
+    if (m.colaRespaldo) aristas.push({ de: 'm:' + m.id, a: 'q:' + m.colaRespaldo });
+  });
+  seccion.flows.forEach(function (f) {
+    f.enrutamientos.forEach(function (e) {
+      if (e.agenteIA) {
+        const id = 'ia:' + e.agenteIA;
+        if (!destinos.some(function (d) { return d.id === id; })) {
+          destinos.push({ id: id, etiqueta: e.agenteIA, detalle: 'Agente de Agentforce', color: colorCanal(indiceCanal(seccion, null, f.id)) });
+        }
+        aristas.push({ de: 'f:' + f.id, a: id });
+      } else if (e.colaId) {
+        aristas.push({ de: 'f:' + f.id, a: 'q:' + e.colaId });
+      }
+    });
+  });
+  const nodosCanal = seccion.canales.map(function (c, i) {
+    c.colas.forEach(function (id) { aristas.push({ de: 'q:' + id, a: 'c:' + c.api }); });
+    return { id: 'c:' + c.api, etiqueta: c.nombre, detalle: c.objetoEtiqueta, color: colorCanal(i), url: urlSalesforce('canal', c.id) };
+  });
+  contenedor.appendChild(el('div', { className: 'tarjeta' }, [
+    el('h3', {}, ['Mapa de enrutamiento']),
+    el('p', { className: 'nota' }, [
+      'De izquierda a derecha, por dónde entra el trabajo, qué flow lo enruta, a qué cola o agente de IA va y qué ' +
+      'canal de servicio lo entrega. El color es el del canal. Pasa el ratón por una caja para ver sus conexiones.'
+    ]),
+    leyenda(seccion.canales.map(function (c, i) { return { etiqueta: c.nombre, color: colorCanal(i) }; })),
+    diagramaCapas([
+      { titulo: 'CANALES DE MENSAJERÍA', nodos: nodosMensajeria },
+      { titulo: 'FLOWS', nodos: nodosFlow },
+      { titulo: 'COLAS Y AGENTES DE IA', nodos: destinos },
+      { titulo: 'CANALES DE SERVICIO', nodos: nodosCanal }
+    ], aristas)
+  ]));
+
+  contenedor.appendChild(el('div', { className: 'canales-resumen' }, seccion.canales.map(function (c, i) {
+    const tarjeta = el('button', { type: 'button', className: 'canal-resumen' }, [
+      el('span', { className: 'canal-resumen-titulo' }, [el('span', { className: 'punto' }), c.nombre]),
+      el('span', { className: 'codigo' }, [c.api + ' · ' + c.objetoEtiqueta]),
+      ficha([
+        ['Colas', num(c.colas.length)],
+        ['Flows', num(c.flows.length)],
+        ['Estados de presencia', num(c.estados.length)],
+        ['Trabajo en ' + dias + ' días', num(c.trabajo)]
+      ]),
+      el('span', { className: 'canal-resumen-ir' }, ['Ver el canal →'])
+    ]);
+    tarjeta.querySelector('.punto').style.background = colorCanal(i);
+    tarjeta.addEventListener('click', function () { abrir(c.api); });
+    return tarjeta;
+  })));
+
+  contenedor.appendChild(el('div', { className: 'tarjeta' }, [
+    el('h3', {}, ['Configuraciones de presencia']),
+    el('p', { className: 'nota' }, ['Capacidad y opciones de los agentes, según su perfil o asignadas a cada usuario.']),
+    seccion.presencia.length
+      ? tablaLicencias(['Configuración', 'Capacidad', 'Aceptación automática', 'Rechazo', 'Asignada a'], seccion.presencia.map(function (p) {
+          return el('tr', {}, [
+            el('td', {}, [enlaceSf(p.nombre, 'presencia', p.id)]),
+            el('td', { className: 'num' }, [oGuion(p.capacidad)]),
+            el('td', {}, [siNo(p.aceptacionAutomatica)]),
+            el('td', {}, [p.rechazo ? 'Sí' + (p.motivosRechazo.length ? ': ' + p.motivosRechazo.join(', ') : '') : 'No']),
+            el('td', {}, [chipsTexto(p.perfiles.map(function (x) { return 'Perfil ' + x; }).concat(p.usuarios), 'Nadie')])
+          ]);
+        }))
+      : vacio('Sin configuraciones de presencia', '')
+  ]));
+
+  contenedor.appendChild(el('div', { className: 'rejilla-2' }, [
+    el('div', { className: 'tarjeta' }, [
+      el('h3', {}, ['Estados de presencia']),
+      el('p', { className: 'nota' }, ['Con qué estado recibe un agente el trabajo de cada canal. Un estado sin canales es de no disponible.']),
+      tablaLicencias(['Estado', 'Canales que habilita'], seccion.estados.map(function (e) {
+        return el('tr', {}, [el('td', {}, [enlaceSf(e.nombre, 'estado', e.id)]), el('td', {}, [chipsTexto(e.canales, 'Ninguno')])]);
+      }))
+    ]),
+    el('div', { className: 'tarjeta' }, [
+      el('h3', {}, ['Supervisión']),
+      el('p', { className: 'nota' }, ['Configuraciones del Omni Supervisor: qué colas ve cada una y a quién se aplica.']),
+      seccion.supervision.length
+        ? tablaLicencias(['Configuración', 'Colas', 'Supervisores'], seccion.supervision.map(function (s) {
+            return el('tr', {}, [
+              el('td', {}, [enlaceSf(s.nombre, 'supervision', s.id)]),
+              el('td', {}, [chipsTexto(s.colas)]),
+              el('td', {}, [chipsTexto(s.usuarios.concat(
+                s.perfiles.map(function (x) { return 'Perfil ' + x; }),
+                s.grupos.map(function (x) { return 'Grupo ' + x; })
+              ), 'Nadie')])
+            ]);
+          }))
+        : vacio('Sin configuraciones de supervisión', '')
+    ])
+  ]));
+
+  const sinCanal = seccion.flows.filter(function (f) { return !flowsEnCanal.has(f.id); });
+  if (sinCanal.length) {
+    contenedor.appendChild(el('div', { className: 'tarjeta' }, [
+      el('h3', {}, ['Flows de Omni-Channel sin canal']),
+      el('p', { className: 'nota' }, [
+        'Flows de Omni-Channel que no se pueden atribuir a un canal: los de paquete, como las plantillas que instala ' +
+        'Salesforce, no dejan leer su contenido; los demás no tienen ninguna acción de enrutar trabajo.'
+      ]),
+      tablaLicencias(['Flow', 'Paquete', 'Estado', 'Por qué'], sinCanal.map(function (f) {
+        return el('tr', {}, [
+          el('td', {}, [enlaceSf(f.etiqueta, 'flow', f.id), el('span', { className: 'codigo' }, [f.api])]),
+          el('td', {}, [f.paquete || '—']),
+          el('td', {}, [f.activo ? 'Activo' : 'Inactivo']),
+          el('td', {}, [f.legible ? 'Sin acción de enrutar trabajo' : 'De paquete: no se puede leer'])
+        ]);
+      }))
+    ]));
+  }
+
+  contenedor.appendChild(el('div', { className: 'tarjeta' }, [
+    el('h3', {}, ['A revisar']),
+    el('p', { className: 'nota' }, ['Lo que en la configuración apunta a un hueco o a algo que no se usa. De todos los canales.']),
+    listaRevisar(seccion.revisar, 'No se ha encontrado nada.')
+  ]));
+
+  return contenedor;
+}
+
+function omniCanal(seccion, canal) {
+  const contenedor = document.createDocumentFragment();
+  const indice = seccion.canales.indexOf(canal);
+  const color = colorCanal(indice);
+  const dias = seccion.diasActividad;
+  const flows = canal.flows.map(function (id) { return flowPorId(seccion, id); }).filter(Boolean);
+  const mensajeria = canal.mensajeria.map(function (id) { return mensajeriaPorId(seccion, id); }).filter(Boolean);
+
+  contenedor.appendChild(kpisEnFila([
+    { etiqueta: 'Objeto', valor: canal.objetoEtiqueta, pie: canal.objeto, texto: true },
+    { etiqueta: 'Colas', valor: num(canal.colas.length), pie: 'que entregan su trabajo' },
+    { etiqueta: 'Flows que lo enrutan', valor: num(flows.length), pie: num(flows.filter(function (f) { return f.activo; }).length) + ' activos' },
+    { etiqueta: 'Estados que lo habilitan', valor: num(canal.estados.length), pie: 'de presencia' },
+    { etiqueta: 'Usuarios en sus colas', valor: num(miembrosEnColas(seccion, canal.colas, true)), pie: pieMiembros(seccion, canal.colas) },
+    { etiqueta: 'Trabajo asignado', valor: num(canal.trabajo), pie: 'últimos ' + dias + ' días' }
+  ]));
+
+  // Recorrido del canal: entrada → flow → cola o agente de IA → personas.
+  const MAX_MIEMBROS = 8;
+  const destinos = [], personas = [], aristas = [];
+  canal.colas.forEach(function (id) {
+    const c = seccion.colas[id];
+    destinos.push({ id: 'q:' + id, etiqueta: c.nombre, detalle: c.enrutamiento ? c.enrutamiento.modelo : 'Sin configuración de enrutamiento', color: color, url: urlSalesforce('cola', id) });
+    c.miembros.slice(0, MAX_MIEMBROS).forEach(function (m) {
+      const idPersona = 'p:' + m.tipo + ':' + m.nombre;
+      if (!personas.some(function (p) { return p.id === idPersona; })) {
+        personas.push({ id: idPersona, etiqueta: m.nombre, detalle: m.tipo + (m.activo ? '' : ' · inactivo'), color: 'var(--estado-neutro)',
+          url: m.tipo === 'Usuario' ? urlSalesforce('usuario', m.id) : '' });
+      }
+      aristas.push({ de: 'q:' + id, a: idPersona });
+    });
+    if (c.miembros.length > MAX_MIEMBROS) {
+      personas.push({ id: 'p:mas:' + id, etiqueta: '+' + (c.miembros.length - MAX_MIEMBROS) + ' más', detalle: 'en ' + c.nombre, color: 'var(--estado-neutro)' });
+      aristas.push({ de: 'q:' + id, a: 'p:mas:' + id });
+    }
+  });
+  flows.forEach(function (f) {
+    f.enrutamientos.filter(function (e) { return e.canal === canal.api; }).forEach(function (e) {
+      if (e.agenteIA) {
+        const id = 'ia:' + e.agenteIA;
+        if (!destinos.some(function (d) { return d.id === id; })) destinos.push({ id: id, etiqueta: e.agenteIA, detalle: 'Agente de Agentforce', color: color });
+        aristas.push({ de: 'f:' + f.id, a: id });
+      } else if (e.colaId) {
+        aristas.push({ de: 'f:' + f.id, a: 'q:' + e.colaId });
+      }
+    });
+  });
+  mensajeria.forEach(function (m) {
+    if (m.flow) aristas.push({ de: 'm:' + m.id, a: 'f:' + m.flow });
+    if (m.colaRespaldo) aristas.push({ de: 'm:' + m.id, a: 'q:' + m.colaRespaldo });
+  });
+  contenedor.appendChild(el('div', { className: 'tarjeta' }, [
+    el('h3', {}, ['Recorrido del trabajo']),
+    el('p', { className: 'nota' }, [
+      'Por dónde entra, qué flow lo enruta, a qué cola o agente de IA va y quién lo atiende. De cada cola salen ' +
+      'hasta ' + MAX_MIEMBROS + ' miembros; el resto, en su ficha.'
+    ]),
+    destinos.length
+      ? diagramaCapas([
+          { titulo: 'ENTRADAS', nodos: mensajeria.map(function (m) { return { id: 'm:' + m.id, etiqueta: m.nombre, detalle: m.tipo + (m.activo ? '' : ' · inactivo'), color: color, url: urlSalesforce('mensajeria', m.id) }; }) },
+          { titulo: 'FLOWS', nodos: flows.map(function (f) { return { id: 'f:' + f.id, etiqueta: f.etiqueta, detalle: f.activo ? 'Flow activo' : 'Flow inactivo', color: color, url: urlSalesforce('flow', f.id) }; }) },
+          { titulo: 'COLAS Y AGENTES DE IA', nodos: destinos },
+          { titulo: 'MIEMBROS', nodos: personas }
+        ], aristas)
+      : vacio('Sin colas', 'Ninguna cola entrega el trabajo de este canal.')
+  ]));
+
+  contenedor.appendChild(el('div', { className: 'tarjeta' }, [
+    el('h3', {}, ['Configuración del canal']),
+    ficha([
+      ['Nombre API', enlaceSf(el('code', {}, [canal.api]), 'canal', canal.id)],
+      ['Objeto', canal.objetoEtiqueta === canal.objeto ? canal.objeto : canal.objetoEtiqueta + ' (' + canal.objeto + ')'],
+      ['Aceptación automática', siNo(canal.aceptacionAutomatica)],
+      ['Minimizar al aceptar', siNo(canal.minimizarAlAceptar)],
+      ['Trabajo posterior', canal.trabajoPosterior ? num(canal.trabajoPosterior) + ' s' : 'No'],
+      ['Estados de presencia', chipsTexto(canal.estados, 'Ninguno')]
+    ])
+  ]));
+
+  if (mensajeria.length) {
+    contenedor.appendChild(el('div', { className: 'tarjeta' }, [
+      el('h3', {}, ['Canales de mensajería']),
+      el('p', { className: 'nota' }, ['Qué hace cada canal con una conversación nueva: la pasa a un flow y, si no puede, a la cola de respaldo.']),
+      tablaLicencias(['Canal', 'Tipo', 'Estado', 'Gestión de sesiones', 'Flow', 'Cola de respaldo', 'Solo en horario'], mensajeria.map(function (m) {
+        const flow = flowPorId(seccion, m.flow);
+        const respaldo = seccion.colas[m.colaRespaldo];
+        // Guardados antes de existir el campo: se daban por leídos.
+        const sinLeer = m.legible === false
+          ? el('span', { className: 'sin-dato', title: 'La Metadata API de Salesforce dio error al leer este canal' }, ['No se pudo leer'])
+          : null;
+        return el('tr', {}, [
+          el('td', {}, [enlaceSf(m.nombre, 'mensajeria', m.id), el('span', { className: 'codigo' }, [m.api])]),
+          el('td', {}, [m.tipo]),
+          el('td', {}, [m.activo ? 'Activo' : 'Inactivo']),
+          el('td', {}, [m.gestion ? m.gestion : (sinLeer || '—')]),
+          el('td', {}, [flow ? enlaceSf(flow.etiqueta, 'flow', flow.id) : (m.flowApi ? m.flowApi : (sinLeer ? sinLeer.cloneNode(true) : '—'))]),
+          el('td', {}, [respaldo ? enlaceSf(respaldo.nombre, 'cola', respaldo.id) : '—']),
+          el('td', {}, [siNo(m.horario)])
+        ]);
+      }))
+    ]));
+  }
+
+  contenedor.appendChild(el('div', { className: 'rejilla-2' }, canal.colas.map(function (id) {
+    const c = seccion.colas[id];
+    const r = c.enrutamiento;
+    return el('div', { className: 'tarjeta' }, [
+      el('h3', {}, [enlaceSf(c.nombre, 'cola', c.id)]),
+      el('p', { className: 'nota' }, [el('code', {}, [c.api]), ' · acepta ', c.objetos.join(', ') || '—']),
+      ficha([
+        ['Configuración de enrutamiento', r ? enlaceSf(r.nombre, 'enrutamiento', r.id) : 'Ninguna'],
+        ['Modelo', r ? r.modelo : '—'],
+        ['Prioridad', r ? oGuion(r.prioridad) : '—'],
+        ['Capacidad que ocupa', r ? (r.porcentajeCapacidad ? r.porcentajeCapacidad + ' %'
+          : oGuion(r.pesoCapacidad) + (r.pesoCapacidad === 1 ? ' unidad' : ' unidades')) : '—'],
+        ['Tiempo para aceptar', r && r.timeout ? num(r.timeout) + ' s' : '—'],
+        ['Desbordamiento', r ? oGuion(r.desbordamiento) : '—'],
+        ['Por atributos', r ? siNo(r.porAtributos) : '—'],
+        ['Supervisada en', chipsTexto(c.supervision, 'Ninguna')],
+        ['Trabajo en ' + dias + ' días', num(c.trabajo)]
+      ]),
+      el('div', { className: 'subtitulo' }, ['Miembros (' + num(c.miembros.length) + ')']),
+      c.miembros.length
+        ? el('div', { className: 'chips' }, c.miembros.map(function (m) {
+            return el('span', { className: 'chip' + (m.activo ? '' : ' inactivo'), title: m.tipo + (m.activo ? '' : ', inactivo') }, [
+              m.tipo === 'Usuario'
+                ? enlaceSf(m.nombre + (m.activo ? '' : ' (inactivo)'), 'usuario', m.id)
+                : m.tipo + ': ' + m.nombre
+            ]);
+          }))
+        : el('span', { className: 'sin-dato' }, ['Sin miembros'])
+    ]);
+  })));
+
+  flows.forEach(function (f) {
+    const propios = f.enrutamientos.filter(function (e) { return e.canal === canal.api; });
+    contenedor.appendChild(el('div', { className: 'tarjeta' }, [
+      el('h3', {}, [enlaceSf(f.etiqueta, 'flow', f.id)]),
+      el('p', { className: 'nota' }, [
+        el('code', {}, [f.api]), ' · ', f.tipo, f.objeto ? ' de ' + f.objeto : '', ' · ',
+        f.activo ? 'activo, versión ' + oGuion(f.version) : 'inactivo',
+        f.sinActivar ? ' · hay una versión posterior sin activar' : ''
+      ]),
+      f.descripcion ? el('p', { className: 'descripcion-flow' }, [f.descripcion]) : null,
+      propios.length
+        ? tablaLicencias(['Elemento', 'Enruta', 'Cola', 'Agente de IA'], propios.map(function (e) {
+            return el('tr', {}, [
+              el('td', {}, [e.elemento]),
+              el('td', {}, [e.tipoEtiqueta]),
+              el('td', {}, [oGuion(e.cola || e.colaId)]),
+              el('td', {}, [oGuion(e.agenteIA)])
+            ]);
+          }))
+        : null,
+      f.grafo
+        ? el('div', {}, [
+            el('div', { className: 'subtitulo' }, ['Diagrama del flow (' + num(f.grafo.nodos.length - 1) + ' elementos)']),
+            leyenda(TIPOS_ELEMENTO_FLOW),
+            diagramaFlow(f.grafo)
+          ])
+        : vacio('Flow de paquete', 'Su contenido no se puede leer.')
+    ]));
+  });
+
+  contenedor.appendChild(el('div', { className: 'tarjeta' }, [
+    el('h3', {}, ['A revisar']),
+    listaRevisar(seccion.revisar.filter(function (e) { return e.canal === canal.api; }), 'No se ha encontrado nada en este canal.')
+  ]));
+
+  return contenedor;
+}
+
+function renderOmnichannel(seccion) {
+  if (seccion.sinOmni) return vacio('Sin Omni-Channel', seccion.descripcion);
+
+  const pestanas = [{ id: 'general', etiqueta: 'General', color: null }].concat(seccion.canales.map(function (c, i) {
+    return { id: c.api, etiqueta: c.nombre, color: colorCanal(i) };
+  }));
+  if (!pestanas.some(function (p) { return p.id === PESTANA_OMNI; })) PESTANA_OMNI = 'general';
+
+  const cuerpo = el('div', { className: 'pestana-cuerpo' });
+  const botones = pestanas.map(function (p) {
+    const punto = p.color ? el('span', { className: 'punto' }) : null;
+    if (punto) punto.style.background = p.color;
+    const boton = el('button', { type: 'button', className: 'pestana', role: 'tab' }, [punto, p.etiqueta]);
+    boton.addEventListener('click', function () { abrir(p.id); });
+    return boton;
+  });
+
+  function abrir(id) {
+    PESTANA_OMNI = id;
+    botones.forEach(function (boton, i) { boton.setAttribute('aria-selected', pestanas[i].id === id ? 'true' : 'false'); });
+    cuerpo.textContent = '';
+    const canal = seccion.canales.find(function (c) { return c.api === id; });
+    cuerpo.appendChild(canal ? omniCanal(seccion, canal) : omniGeneral(seccion, abrir));
+  }
+
+  const fragmento = document.createDocumentFragment();
+  fragmento.append(el('div', { className: 'pestanas', role: 'tablist' }, botones), cuerpo);
+  abrir(PESTANA_OMNI);
+  return fragmento;
+}
+
 const RENDERIZADORES = {
   'gestion-usuarios': renderGestionUsuarios,
   'visor-grupos': renderVisorGrupos,
   'visor-permisos': renderVisorPermisos,
   'licencias': renderLicencias,
-  'visor-flows': renderVisorFlows
+  'visor-flows': renderVisorFlows,
+  'omnichannel': renderOmnichannel
 };
 
 /* ---------------------------- Arranque ---------------------------- */
 
-// La página que se está viendo, que el servidor deja en el body.
+// La página que se está viendo, que el servidor deja en el body, y si enseña lo
+// guardado en disco en vez de consultar el org.
 const PAGINA = document.body.dataset.pagina;
+const PAGINA_GUARDADA = document.body.dataset.guardada === '1';
 
 const selectorOrg = document.getElementById('org');
 const botonRecargar = document.getElementById('recargar');
@@ -2248,7 +2945,10 @@ function pintarSello() {
       // que cualifica, y separarlo deja leer el alias sin verlo.
       DATOS.esProduccion ? el('span', { className: 'marca-pro', title: 'Este org no es un sandbox' }, ['PRODUCCIÓN']) : null
     ]),
-    el('span', {}, ['Consultado ', el('b', {}, [DATOS.consultado])])
+    el('span', {}, ['Consultado ', el('b', {}, [
+      // Una pagina guardada puede ser de otro dia: con fecha. Las demas son de ahora.
+      PAGINA_GUARDADA && DATOS.consultadoEl ? fechaHora(DATOS.consultadoEl) : DATOS.consultado
+    ])])
   );
 
   document.body.classList.toggle('es-produccion', !!DATOS.esProduccion);
@@ -2274,6 +2974,8 @@ function consultar(forzar) {
   nota.textContent = 'Consultando el org…';
 
   const parametros = new URLSearchParams({ org: selectorOrg.value, pagina: PAGINA });
+  // Las paginas que se guardan en disco solo vuelven al org con «Actualizar».
+  if (forzar) parametros.set('forzar', '1');
 
   fetch('/api/datos?' + parametros.toString(), { cache: 'no-store' })
     .then(function (respuesta) { return respuesta.json(); })

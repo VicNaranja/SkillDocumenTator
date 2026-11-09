@@ -563,11 +563,12 @@ UPDATE_SCRIPT = r'''
 # ── Index management ─────────────────────────────────────────────────────────
 
 # Páginas que consultan el org al abrirlas: las sirve servir_documentator.py y no
-# se guardan en disco.
+# se guardan en disco, salvo Omni-Channel, que enseña lo último guardado.
 LIVE_PAGES = [
     ('vivo/usuarios', 'Gestión de usuarios', 'Usuarios, permission set groups, permission sets y perfiles'),
     ('vivo/licencias', 'Licencias', 'Estado de las licencias del org'),
     ('vivo/flows', 'Flows', 'Todos los flows del org'),
+    ('vivo/omnichannel', 'Omni-Channel', 'Canales, colas, enrutamiento y flows de Omni-Channel'),
 ]
 
 

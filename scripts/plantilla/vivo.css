@@ -27,6 +27,15 @@
   --estado-neutro-claro:  #c3c2b7;
   --estado-neutro-oscuro: #52514e;
 
+  /* Canales de Omni-Channel (y tipos de elemento de flow), en orden fijo.
+     Validados con el validador de paletas de la skill dataviz contra cada fondo. */
+  --canal-1: #0070d2;
+  --canal-2: #eb6834;
+  --canal-3: #1baf7a;
+  --canal-4: #eda100;
+  --canal-5: #e87ba4;
+  --canal-6: #6250d6;
+
   --cabecera: linear-gradient(135deg, #0070d2 0%, #1589ee 100%);
 }
 
@@ -48,6 +57,13 @@
   --serie-suave:   #184f95;
 
   --estado-neutro-oscuro: #c3c2b7;
+
+  --canal-1: #3987e5;
+  --canal-2: #d95926;
+  --canal-3: #199e70;
+  --canal-4: #c98500;
+  --canal-5: #d55181;
+  --canal-6: #9085e9;
 }
 
 * { box-sizing: border-box; }
@@ -925,3 +941,75 @@ a.enlace-config { color: var(--tinta-apagada); font-weight: 400; }
 }
 .flows-desplegables { display: inline-flex; gap: 0.5rem; flex-wrap: wrap; }
 .flows-desplegables .desplegar { font-size: 0.82rem; padding: 0.35rem 0.6rem; }
+
+/* --------------------------- Omni-Channel -------------------------- */
+
+.pestanas {
+  display: flex; flex-wrap: wrap; gap: 0.25rem;
+  border-bottom: 1px solid var(--borde); margin-bottom: 1.25rem;
+}
+.pestana {
+  display: inline-flex; align-items: center; gap: 0.45rem;
+  font: inherit; font-size: 0.88rem; font-weight: 600;
+  padding: 0.55rem 0.9rem; border: 0; border-bottom: 3px solid transparent;
+  background: transparent; color: var(--tinta-2); cursor: pointer; margin-bottom: -1px;
+}
+.pestana:hover { color: var(--tinta); }
+.pestana[aria-selected="true"] { color: var(--tinta); border-bottom-color: var(--serie-1); }
+.punto { display: inline-block; width: 0.6rem; height: 0.6rem; border-radius: 50%; flex: none; }
+
+.sin-dato { color: var(--tinta-apagada); }
+.subtitulo { margin: 1rem 0 0.5rem; font-size: 12px; font-weight: 700; color: var(--tinta-2); }
+.descripcion-flow { margin: -0.4rem 0 0.9rem; max-width: 110ch; color: var(--tinta-2); }
+
+.ficha { display: grid; grid-template-columns: max-content 1fr; gap: 0.35rem 1rem; margin: 0; font-size: 0.85rem; }
+.ficha dt { color: var(--tinta-2); }
+.ficha dd { margin: 0; }
+.ficha code, .nota code { font-size: 0.78rem; color: var(--tinta-2); }
+
+.chip.ajuste { padding: 0.25rem 0.6rem 0.25rem 0.45rem; color: var(--tinta-2); }
+.chip.ajuste.activo { color: var(--tinta); }
+.ajuste-marca { font-weight: 700; color: var(--estado-neutro); }
+.chip.ajuste.activo .ajuste-marca { color: var(--estado-bueno); }
+
+.leyenda { display: flex; flex-wrap: wrap; gap: 0.4rem 1rem; margin: 0 0 0.75rem; font-size: 0.78rem; color: var(--tinta-2); }
+.leyenda-entrada { display: inline-flex; align-items: center; gap: 0.4rem; }
+.leyenda-muestra { width: 0.7rem; height: 0.7rem; border-radius: 3px; }
+
+.diagrama { overflow-x: auto; padding-bottom: 0.25rem; }
+.diagrama-flow { max-height: 44rem; overflow-y: auto; border: 1px solid var(--rejilla); border-radius: 8px; padding: 0.75rem; }
+.diagrama-svg { display: block; font-family: inherit; }
+.diagrama-columna { font-size: 10.5px; font-weight: 700; letter-spacing: 0.05em; fill: var(--tinta-apagada); }
+.diagrama-caja { fill: var(--superficie-2); stroke: var(--borde); }
+.diagrama-caja.destacada { stroke: var(--canal-1); stroke-width: 2; }
+.diagrama-etiqueta { font-size: 12px; font-weight: 600; fill: var(--tinta); }
+.diagrama-detalle { font-size: 11px; fill: var(--tinta-2); }
+.diagrama-arista { fill: none; stroke: var(--tinta-apagada); stroke-width: 1.5; opacity: 0.55; transition: opacity 0.12s; }
+.diagrama-arista.vuelta { stroke-dasharray: 4 3; }
+.diagrama-arista.fallo { stroke: var(--estado-critico); stroke-dasharray: 4 3; }
+.diagrama-condicion { font-size: 10.5px; fill: var(--tinta-2); }
+.diagrama-condicion-fondo { fill: var(--superficie); stroke: var(--rejilla); }
+.diagrama-nodo { cursor: default; }
+.diagrama-nodo:hover .diagrama-caja { stroke: var(--tinta-2); }
+.diagrama-svg.enfocado .diagrama-arista { opacity: 0.12; }
+.diagrama-svg.enfocado .diagrama-arista.activa { opacity: 1; stroke: var(--tinta); stroke-width: 2; }
+
+.canales-resumen { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 1rem; margin-bottom: 1.25rem; }
+.canal-resumen {
+  display: flex; flex-direction: column; gap: 0.5rem; text-align: left;
+  font: inherit; color: var(--tinta); background: var(--superficie);
+  border: 1px solid var(--borde); border-radius: 8px; padding: 1rem 1.15rem; cursor: pointer;
+}
+.canal-resumen:hover { border-color: var(--serie-1); background: var(--resalte); }
+.canal-resumen-titulo { display: inline-flex; align-items: center; gap: 0.5rem; font-size: 14px; font-weight: 700; }
+.canal-resumen-ir { font-size: 0.8rem; color: var(--serie-1); font-weight: 600; }
+
+ul.revisar { margin: 0; padding-left: 1.2rem; display: grid; gap: 0.35rem; }
+/* Un KPI que es un nombre, no un número: más pequeño, para que no parta en tres líneas. */
+.kpi-valor.texto { font-size: 1.2rem; letter-spacing: 0; line-height: 1.3; margin-top: 0.6rem; }
+.diagrama-nodo.enlazado { cursor: pointer; }
+.diagrama-nodo.enlazado:hover .diagrama-caja { stroke: var(--serie-1); }
+.tarjeta > h3 a, .ficha a, .nota a { color: var(--serie-1); text-decoration: none; }
+.tarjeta > h3 a:hover, .ficha a:hover, .nota a:hover { text-decoration: underline; }
+.chip a { color: inherit; text-decoration: none; }
+.chip a:hover { color: var(--serie-1); text-decoration: underline; }

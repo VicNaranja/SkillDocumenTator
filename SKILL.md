@@ -1,6 +1,6 @@
 ---
 name: documentar-objeto
-description: Genera documentación HTML de un objeto Salesforce con todos sus campos, tipos, descripciones, valores picklist (API value → Label), reglas de validación, record-triggered flows y apex triggers, con un botón para actualizarla desde el org elegido; y abre las páginas en vivo de usuarios, licencias y flows del org. Actívalo cuando el usuario pida "documenta el objeto X", "documentar objeto", "/documentar-objeto ObjectName", "documentar userList", "documentar userLicence" o "documentar flows".
+description: Genera documentación HTML de un objeto Salesforce con todos sus campos, tipos, descripciones, valores picklist (API value → Label), reglas de validación, record-triggered flows y apex triggers, con un botón para actualizarla desde el org elegido; y abre las páginas en vivo de usuarios, licencias, flows y Omni-Channel del org. Actívalo cuando el usuario pida "documenta el objeto X", "documentar objeto", "/documentar-objeto ObjectName", "documentar userList", "documentar userLicence", "documentar flows" o "documentar omnichannel".
 license: MIT
 compatibility: "Requiere Python 3 y Salesforce CLI (sf) autenticado en la org de destino."
 allowed-tools: Bash PowerShell Read Write Glob Grep
@@ -17,14 +17,14 @@ Activa esta skill cuando el usuario:
 - Use `/documentar-objeto` con o sin argumentos
 - Pida "documenta el objeto X", "genera la documentación de X", "quiero el HTML del objeto X"
 - Mencione documentar un sObject de Salesforce
-- Pida `documentar userList`, `documentar userLicence` o `documentar flows`: son las páginas en vivo (ver «Páginas en vivo»), no un objeto
+- Pida `documentar userList`, `documentar userLicence`, `documentar flows` o `documentar omnichannel`: son las páginas en vivo (ver «Páginas en vivo»), no un objeto
 
 ## Pasos
 
 ### 1. Obtener parámetros
 
 Extrae de `$ARGUMENTS`:
-- Primera palabra → nombre del objeto (API Name), ej: `VoiceCall`, `Case`, `Account`; o `all` para regenerar todos; o `userList`, `userLicence` o `flows`, que no son objetos y van por «Páginas en vivo» (no sigas los pasos 2–8)
+- Primera palabra → nombre del objeto (API Name), ej: `VoiceCall`, `Case`, `Account`; o `all` para regenerar todos; o `userList`, `userLicence`, `flows` u `omnichannel`, que no son objetos y van por «Páginas en vivo» (no sigas los pasos 2–8)
 - Segunda palabra → alias de org (opcional)
 
 Si no se proporciona alias, lista los orgs disponibles y pide al usuario que confirme:
@@ -263,19 +263,20 @@ Cuando la sesión la lanza el botón, el prompt lo dice («Actualización autom�
 
 ## Páginas en vivo
 
-`documentar userList`, `documentar userLicence` y `documentar flows` no generan ningún fichero: abren una página del servidor que consulta el org en cada carga. El selector de org ofrece los alias que la CLI tiene autenticados, recuerda el último elegido y marca `PRODUCCIÓN` cuando el org no es un sandbox (lo pregunta al org, no lo deduce del alias). No se guardan en disco porque muestran datos de usuarios del org, y un fichero con ellos acabaría versionado.
+`documentar userList`, `documentar userLicence`, `documentar flows` y `documentar omnichannel` abren una página del servidor que consulta el org. El selector de org ofrece los alias que la CLI tiene autenticados, recuerda el último elegido y marca `PRODUCCIÓN` cuando el org no es un sandbox (lo pregunta al org, no lo deduce del alias). Las tres primeras consultan en cada carga y no se guardan en disco, porque muestran datos de usuarios del org y un fichero con ellos acabaría versionado. La de Omni-Channel es la excepción: recogerla tarda decenas de segundos (lee la metadata de todos los flows activos), así que guarda cada consulta en `documentator/_vivo/omnichannel-<alias>.json`, enseña lo último guardado y solo su botón **Actualizar** vuelve al org.
 
 | Petición | Página | Qué tiene |
 |---|---|---|
 | `userList` | `vivo/usuarios` | Gestión de usuarios: listado de usuarios con filtros y columnas, asignar y quitar permisos, visor de permission set groups y visor de permission sets y perfiles |
 | `userLicence` | `vivo/licencias` | Estado de las licencias del org: lo que mide cada gráfico lo explica la propia página |
 | `flows` | `vivo/flows` | Visor de todos los flows del org, con filtros, buscador y ordenación |
+| `omnichannel` | `vivo/omnichannel` | Configuración de Omni-Channel: una pestaña General (ajustes, mapa de enrutamiento, presencia, estados, supervisión y observaciones) y una por canal de servicio, con el recorrido del trabajo, los canales de mensajería que le entregan, la configuración de cada cola y el diagrama de cada flow que lo enruta |
 
-Para cualquiera de las tres: arranca el servidor (o reutiliza el que ya esté) con `--org ORG_ALIAS --abrir vivo/<página>` e informa de la URL. Si no se da alias, el que se haya usado en la conversación; si no hay, pregunta.
+Para cualquiera de ellas: arranca el servidor (o reutiliza el que ya esté) con `--org ORG_ALIAS --abrir vivo/<página>` e informa de la URL. Si no se da alias, el que se haya usado en la conversación; si no hay, pregunta.
 
 **La gestión de usuarios escribe en el org**: asignar y quitar permisos, por POST y con confirmación en la página, que en producción exige escribir el alias. Es la única escritura del documentator.
 
-Cada página es una entrada de `PAGINAS` en `scripts/secciones/__init__.py`, con sus módulos de sección (`recoger(org)` y, si lista algo bajo demanda, `detalle(org, cual)`), y su render en `scripts/plantilla/vivo.js`.
+Cada página es una entrada de `PAGINAS` en `scripts/secciones/__init__.py`, con sus módulos de sección (`recoger(org)` y, si lista algo bajo demanda, `detalle(org, cual)`), y su render en `scripts/plantilla/vivo.js`. Con `"guardar": True`, la página enseña lo guardado en `documentator/_vivo/` en vez de consultar en cada carga.
 
 ## Notas
 

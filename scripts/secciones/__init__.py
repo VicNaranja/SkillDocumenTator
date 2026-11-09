@@ -8,6 +8,10 @@ Cada modulo de seccion expone:
     TITULO   texto de la cabecera de la seccion
     recoger(org) -> dict serializable con los datos de la seccion
 y, si sabe listar algo bajo demanda, `detalle(org, cual)`.
+
+Una pagina con `guardar` no consulta el org en cada carga: enseña lo ultimo
+guardado en disco de ese org, y solo «Actualizar» vuelve a consultarlo. Es para
+las que tardan demasiado en recogerse.
 """
 
 from . import usuarios
@@ -15,11 +19,13 @@ from . import visor_grupos
 from . import visor_permisos
 from . import visor_flows
 from . import licencias
+from . import omnichannel
 
 PAGINAS = [
     {"id": "usuarios", "titulo": "Gestión de usuarios", "modulos": [usuarios, visor_grupos, visor_permisos]},
     {"id": "licencias", "titulo": "Licencias", "modulos": [licencias]},
     {"id": "flows", "titulo": "Flows", "modulos": [visor_flows]},
+    {"id": "omnichannel", "titulo": "Omni-Channel", "modulos": [omnichannel], "guardar": True},
 ]
 
 MODULOS = [modulo for pagina in PAGINAS for modulo in pagina["modulos"]]

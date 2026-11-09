@@ -5,7 +5,7 @@ Sirve en local la documentacion generada por la skill documentar-objeto.
     python servir_documentator.py
     python servir_documentator.py --org MI-SANDBOX --abrir vivo/usuarios
 
-Tres cosas, en el mismo servidor:
+Cuatro cosas, en el mismo servidor:
 
 - Los HTML de `documentator/` (indice y una pagina por objeto), tal cual estan
   en disco.
@@ -16,6 +16,9 @@ Tres cosas, en el mismo servidor:
 - Las paginas en vivo (/vivo/usuarios, /vivo/licencias, /vivo/flows), que
   consultan el org en cada carga y no escriben nada a disco: muestran datos de
   usuarios del org, y un fichero con ellos acabaria versionado.
+- La pagina de Omni-Channel (/vivo/omnichannel), que es la excepcion: recogerla
+  tarda decenas de segundos, asi que enseña lo ultimo guardado en
+  documentator/_vivo/ y solo «Actualizar» vuelve a consultar el org.
 
 La sesion con el org se toma prestada de la CLI `sf` (ver org.py). La unica
 escritura en el org es la asignacion de permisos de la gestion de usuarios
@@ -45,6 +48,7 @@ import webbrowser
 
 import org as modulo_org
 import secciones
+import sf_doc_generator
 
 BASE = pathlib.Path(__file__).resolve().parent
 PLANTILLA = BASE / "plantilla"
@@ -57,6 +61,15 @@ PUERTO_POR_DEFECTO = 8788
 TIMEOUT_ACTUALIZACION = 45 * 60
 
 NOMBRE_OBJETO = re.compile(r"^[A-Za-z][A-Za-z0-9_]{0,79}$")
+
+PIE_VIVO = (
+    "Los datos se consultan al org en cada carga y en cada cambio de org; no se guardan en disco. La hora "
+    "de la última consulta aparece en la cabecera."
+)
+PIE_GUARDADO = (
+    "Los datos se guardan en documentator/_vivo/ cada vez que se consultan, y la página enseña lo último "
+    "guardado de cada org: «Actualizar» vuelve a consultar el org. La fecha de la consulta aparece en la cabecera."
+)
 
 # Lo unico que puede hacer la sesion lanzada por el boton. Va en modo dontAsk, asi
 # que lo que no este aqui se deniega sin preguntar: no hay nadie para contestar.
@@ -100,6 +113,8 @@ def pagina_vivo(pagina):
         (PLANTILLA / "vivo.html").read_text(encoding="utf-8")
         .replace("__TITULO__", pagina["titulo"])
         .replace("__PAGINA__", pagina["id"])
+        .replace("__PIE__", PIE_GUARDADO if pagina.get("guardar") else PIE_VIVO)
+        .replace("__GUARDADA__", "1" if pagina.get("guardar") else "")
         .replace("/*__CSS__*/", (PLANTILLA / "vivo.css").read_text(encoding="utf-8"))
         .replace("/*__JS__*/", (PLANTILLA / "vivo.js").read_text(encoding="utf-8"))
     )
@@ -124,6 +139,8 @@ def recoger_datos(alias, pagina):
         "esProduccion": conexion.es_produccion(),
         "pagina": pagina["id"],
         "consultado": datetime.datetime.now().strftime("%H:%M:%S"),
+        # Lo que se guarda en disco se lee otro dia: ahi la hora sola no basta.
+        "consultadoEl": datetime.datetime.now().isoformat(timespec="seconds"),
         "secciones": resultados,
     }
 
@@ -314,8 +331,22 @@ class Manejador(http.server.BaseHTTPRequestHandler):
         pagina = secciones.pagina((consulta.get("pagina") or [""])[0])
         if not pagina:
             raise ValueError("Página desconocida.")
-        print("  [{}] {} · {}".format(_ahora(), alias, pagina["id"]))
-        return recoger_datos(alias, pagina)
+        if not pagina.get("guardar"):
+            print("  [{}] {} · {}".format(_ahora(), alias, pagina["id"]))
+            return recoger_datos(alias, pagina)
+
+        # El alias va en el nombre del fichero: solo los que la CLI conoce.
+        if alias not in modulo_org.alias_disponibles():
+            raise ValueError("La CLI no tiene autenticado el org {!r}.".format(alias))
+        fichero = self.documentator / "_vivo" / "{}-{}.json".format(pagina["id"], re.sub(r"[^A-Za-z0-9_.-]", "_", alias))
+        if (consulta.get("forzar") or [""])[0] != "1" and fichero.is_file():
+            return json.loads(fichero.read_text(encoding="utf-8"))
+
+        print("  [{}] {} · {} (se guarda)".format(_ahora(), alias, pagina["id"]))
+        datos = recoger_datos(alias, pagina)
+        fichero.parent.mkdir(exist_ok=True)
+        fichero.write_text(json.dumps(datos, ensure_ascii=False), encoding="utf-8")
+        return datos
 
     def _detalle(self, consulta):
         alias = (consulta.get("org") or [self.org_por_defecto])[0]
@@ -366,6 +397,11 @@ def main():
 
     raiz = pathlib.Path(argumentos.raiz).resolve()
     (raiz / "documentator").mkdir(exist_ok=True)
+
+    # El indice solo se reescribe al documentar un objeto: sin esto, una pagina en
+    # vivo nueva no tendria enlace hasta la siguiente vez.
+    if (raiz / "documentator" / "manifest.json").is_file():
+        sf_doc_generator.write_index(str(raiz / "documentator"))
 
     print("Documentator")
     print("  Preparando sesión…", end=" ", flush=True)
