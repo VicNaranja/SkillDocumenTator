@@ -60,6 +60,8 @@ PUERTO_POR_DEFECTO = 8788
 # nuevos tarda minutos, pero mas de esto es que se ha quedado colgada.
 TIMEOUT_ACTUALIZACION = 45 * 60
 
+SUFIJOS_TECNICOS = ("__mdt", "__e", "__b", "__x", "__xo", "__ChangeEvent", "__Share", "__History", "__Feed")
+
 NOMBRE_OBJETO = re.compile(r"^[A-Za-z][A-Za-z0-9_]{0,79}$")
 
 PIE_VIVO = (
@@ -96,7 +98,7 @@ DENEGADAS = [
 
 PROMPT = (
     "Actualización automática de documentación, lanzada desde el botón «Actualizar» de la "
-    "página del objeto. Lee {skill} y sigue sus pasos para documentar el objeto {objeto} en el "
+    "página del objeto o desde «Documentar objeto» del índice. Lee {skill} y sigue sus pasos para documentar el objeto {objeto} en el "
     "org {org}, en el modo no interactivo que describe. Es lo único que hay que hacer: no "
     "preguntes ni pidas confirmación, no compares con el org, no abras tarjetas ni sigas el "
     "ciclo de trabajo del proyecto, no hagas commits y no escribas fuera de documentator/. "
@@ -168,6 +170,7 @@ class Actualizaciones:
             self.estado[objeto] = {
                 "objeto": objeto, "org": alias, "estado": "en-cola",
                 "pedido": _ahora(), "inicio": "", "fin": "", "mensaje": "",
+                "pasos": PASOS, "paso": -1, "accion": "",
             }
             self.cola.put(objeto)
             return dict(self.estado[objeto])
@@ -176,6 +179,11 @@ class Actualizaciones:
         with self.cerrojo:
             actual = self.estado.get(objeto)
             return dict(actual) if actual else {"objeto": objeto, "estado": "ninguna"}
+
+    def en_curso(self):
+        """Las que están en cola o en marcha, para que el índice las retome al abrirse."""
+        with self.cerrojo:
+            return [dict(e) for e in self.estado.values() if e["estado"] in ("en-cola", "actualizando")]
 
     def _marcar(self, objeto, **campos):
         with self.cerrojo:
@@ -212,21 +220,44 @@ class Actualizaciones:
             "--setting-sources", "project",
             "--allowedTools", *HERRAMIENTAS,
             "--disallowedTools", *DENEGADAS,
-            "--output-format", "json",
+            # stream-json: un evento por línea mientras trabaja, para ir contando
+            # en qué paso va. En modo -p exige --verbose.
+            "--output-format", "stream-json", "--verbose",
             "--no-session-persistence",
         ]
-        proceso = subprocess.run(
-            comando, cwd=str(self.raiz), capture_output=True, text=True,
-            encoding="utf-8", errors="replace", timeout=TIMEOUT_ACTUALIZACION,
-            stdin=subprocess.DEVNULL,
+        proceso = subprocess.Popen(
+            comando, cwd=str(self.raiz), stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            stdin=subprocess.DEVNULL, text=True, encoding="utf-8", errors="replace",
         )
+        vigia = threading.Timer(TIMEOUT_ACTUALIZACION, proceso.kill)
+        vigia.start()
+        # stderr se vacía aparte: si se llena su tubería, el proceso se bloquea.
+        errores = []
+        threading.Thread(target=lambda: errores.append(proceso.stderr.read()), daemon=True).start()
 
+        respuesta = None
         try:
-            respuesta = json.loads(proceso.stdout)
+            for linea in proceso.stdout:
+                try:
+                    evento = json.loads(linea)
+                except json.JSONDecodeError:
+                    continue
+                if evento.get("type") == "result":
+                    respuesta = evento
+                for paso, accion in _avances(evento):
+                    with self.cerrojo:
+                        actual = self.estado[objeto]
+                        actual["accion"] = accion
+                        actual["paso"] = max(actual["paso"], paso)
+            proceso.wait()
+        finally:
+            vigia.cancel()
+
+        if respuesta is not None:
             mensaje = (respuesta.get("result") or "").strip()
             fallo = respuesta.get("is_error") or proceso.returncode != 0
-        except json.JSONDecodeError:
-            mensaje = (proceso.stderr or proceso.stdout or "").strip()[-800:]
+        else:
+            mensaje = ("".join(errores) or "La sesión terminó sin respuesta (¿tiempo agotado?).").strip()[-800:]
             fallo = True
 
         # La sesion puede acabar «bien» sin haber regenerado nada (p. ej. si le
@@ -239,6 +270,56 @@ class Actualizaciones:
 
 def _ahora():
     return datetime.datetime.now().strftime("%H:%M:%S")
+
+
+# Los pasos de la skill, en orden, para la barra de progreso de la página.
+PASOS = ["Fórmulas", "Flows", "Triggers", "Revisar", "Página"]
+
+
+def _paso_de(herramienta, entrada):
+    """Índice en PASOS de lo que está haciendo una llamada a herramienta, o -1."""
+    texto = json.dumps(entrada, ensure_ascii=False)
+    if "sf_doc_generator.py" in texto:
+        return 0 if "--formulas" in texto else 4
+    if "_review_" in texto:
+        return 3
+    if "_triggers_" in texto or re.search(r"triggers/|\.trigger\b|TriggerDispatcher|Handler", texto):
+        return 2
+    if re.search(r"FlowDefinitionView|_flow_|tmp_flows|tooling/sobjects/Flow", texto):
+        return 1
+    if "_formula_cache" in texto or "_explanations_" in texto:
+        return 0
+    return -1
+
+
+def _accion_de(herramienta, entrada):
+    """Una línea legible de lo que hace la llamada."""
+    if herramienta in ("Bash", "PowerShell"):
+        comando = " ".join((entrada.get("command") or "").split())
+        consulta = re.search(r"FROM\s+(\w+)", comando)
+        if "sf_doc_generator.py" in comando:
+            return "Lee las fórmulas del objeto" if "--formulas" in comando else "Genera la página"
+        if "retrieve start" in comando:
+            return "Descarga los flows que hay que describir"
+        if consulta:
+            return "Consulta " + consulta.group(1)
+        return comando[:90]
+    ruta = entrada.get("file_path") or entrada.get("pattern") or entrada.get("path") or ""
+    nombre = ruta.replace("\\", "/").rsplit("/", 1)[-1]
+    verbo = {"Read": "Lee", "Write": "Escribe", "Edit": "Edita", "Glob": "Busca", "Grep": "Busca"}.get(herramienta, herramienta)
+    return (verbo + " " + nombre).strip()
+
+
+def _avances(evento):
+    """(paso, acción) de cada llamada a herramienta de un evento de stream-json."""
+    if evento.get("type") != "assistant":
+        return []
+    avances = []
+    for bloque in (evento.get("message") or {}).get("content") or []:
+        if bloque.get("type") == "tool_use":
+            entrada = bloque.get("input") or {}
+            avances.append((_paso_de(bloque.get("name"), entrada), _accion_de(bloque.get("name"), entrada)))
+    return avances
 
 
 class Manejador(http.server.BaseHTTPRequestHandler):
@@ -307,6 +388,10 @@ class Manejador(http.server.BaseHTTPRequestHandler):
             if partes.path == "/api/actualizacion":
                 objeto = (consulta.get("objeto") or [""])[0]
                 return self._responder_json(self.actualizaciones.consultar(objeto))
+            if partes.path == "/api/actualizaciones":
+                return self._responder_json(self.actualizaciones.en_curso())
+            if partes.path == "/api/objetos":
+                return self._responder_json(self._objetos(consulta))
             return self._fichero(partes.path)
         except Exception as error:
             traceback.print_exc()
@@ -354,6 +439,27 @@ class Manejador(http.server.BaseHTTPRequestHandler):
         seccion = (consulta.get("seccion") or [""])[0]
         print("  [{}] {} · detalle {}/{}".format(_ahora(), alias, seccion, cual or "(sin subconjunto)"))
         return secciones.con_detalle(seccion).detalle(modulo_org.Org(alias), cual)
+
+    def _objetos(self, consulta):
+        """
+        Los objetos que se pueden documentar, para el «Documentar objeto» del índice.
+        Solo los que tienen formato de página (layoutable), que deja fuera History,
+        Share, Feed o ChangeEvent; los custom metadata (__mdt) sí lo tienen, así
+        que ellos y el resto de técnicos se quitan por sufijo, y las custom settings
+        por su marca.
+        """
+        alias = (consulta.get("org") or [self.org_por_defecto])[0]
+        print("  [{}] {} · lista de objetos".format(_ahora(), alias))
+        objetos = [
+            {"nombre": o["name"], "etiqueta": o.get("label") or o["name"], "custom": bool(o.get("custom"))}
+            for o in modulo_org.Org(alias).objetos()
+            if o.get("layoutable") and o.get("queryable") and not o.get("deprecatedAndHidden")
+            and not o.get("customSetting") and not o["name"].endswith(SUFIJOS_TECNICOS)
+        ]
+        objetos.sort(key=lambda o: o["etiqueta"].lower())
+        manifiesto = self.documentator / "manifest.json"
+        documentados = [e["object"] for e in json.loads(manifiesto.read_text(encoding="utf-8"))] if manifiesto.is_file() else []
+        return {"org": alias, "objetos": objetos, "documentados": documentados}
 
     def _actualizar(self, objeto, alias):
         if not NOMBRE_OBJETO.match(objeto):

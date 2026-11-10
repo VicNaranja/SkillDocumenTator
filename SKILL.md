@@ -225,12 +225,21 @@ documentator/
 ├── VoiceCall/
 │   ├── VoiceCall.html
 │   ├── _formula_cache.json   ← persistente
-│   └── _flow_cache.json      ← persistente
+│   ├── _flow_cache.json      ← persistente
+│   └── _datos.json           ← persistente
 └── Case/
     └── ...
 ```
 
 Los cuatro temporales (`_explanations_`, `_triggers_`, `_flow_descriptions_`, `_review_`) y `_tmp_flows.xml` se escriben en la raíz de `documentator/`, y **los borra el propio generador** al terminar, igual que `documentator/.tmp_flows`: no hay que borrarlos a mano. Los dos cachés viven dentro del subdirectorio del objeto y **no se borran**: son lo que evita repetir el trabajo en la siguiente ejecución.
+
+`_datos.json` también se queda: guarda todo lo que pinta la página (el describe, las reglas, los flows, las explicaciones, los triggers y las observaciones). Con él, un cambio de la plantilla —estilos, estructura, scripts— llega a todas las páginas sin volver al org ni a Claude:
+
+```bash
+python "<RUTA_SCRIPT>" --rehacer
+```
+
+Repinta cada objeto del manifiesto desde su `_datos.json`, conserva la fecha de la consulta y lista los que no lo tienen todavía, que hay que documentar una vez desde el org.
 
 Informa de la ruta del fichero generado e indica:
 - Explicaciones de fórmula reutilizadas del caché vs regeneradas
@@ -250,7 +259,9 @@ python "<RUTA_SCRIPTS>/servir_documentator.py" --org ORG_ALIAS --abrir <ruta>
 
 `--abrir` es la ruta que abre en el navegador (`VoiceCall/VoiceCall.html`, `vivo/usuarios`…); sin ella, el índice. Antes de arrancarlo, mira si ya está levantado pidiendo `http://127.0.0.1:8788/api/config`: si responde, no lances otro, abre la URL en el navegador. Si no, lánzalo **en segundo plano**, porque no termina hasta Ctrl+C.
 
-Cada página de objeto tiene en la cabecera un selector de org y el botón **Actualizar**. El selector solo dice de qué org sale la siguiente actualización; la página que se ve es siempre la última generada, con su org y su fecha en la cabecera. Al pulsar, el servidor lanza Claude Code sin interfaz (`claude -p`) con esta skill para ese objeto y ese org, y la página se recarga cuando termina. Las actualizaciones van de una en una, porque todas reescriben el índice y el manifiesto: las que se piden mientras otra corre esperan en cola.
+Cada página de objeto tiene en la cabecera un selector de org y el botón **Actualizar**. El selector solo dice de qué org sale la siguiente actualización; la página que se ve es siempre la última generada, con su org y su fecha en la cabecera. Al pulsar, el servidor lanza Claude Code sin interfaz (`claude -p`) con esta skill para ese objeto y ese org, y la página se recarga cuando termina. Las actualizaciones van de una en una, porque todas reescriben el índice y el manifiesto: las que se piden mientras otra corre esperan en cola. Mientras corre, la página enseña una barra con los pasos (Fórmulas, Flows, Triggers, Revisar, Página), el que va, la última acción y el tiempo: el servidor lee la salida de la sesión en `stream-json` y deduce el paso de cada herramienta que usa (`PASOS` y `_paso_de` en `servir_documentator.py`).
+
+El índice tiene el botón **Documentar objeto**, que abre una ventana con los objetos del org elegido (`/api/objetos`), con buscador y filtros Estándar / Custom. Deja fuera los técnicos: los que no tienen formato de página (History, Share, Feed, ChangeEvent), las custom settings y los de sufijo `__mdt`, `__e`, `__b`, `__x` y similares (`SUFIJOS_TECNICOS` en `servir_documentator.py`). Los ya documentados salen ocultos salvo que se marque «Ver ya documentados». Al pulsar uno se documenta con la misma cola que **Actualizar**, de uno en uno: mientras uno está en marcha, la lista no deja lanzar otro.
 
 ## Modo no interactivo
 

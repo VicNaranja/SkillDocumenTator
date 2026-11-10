@@ -79,6 +79,9 @@ body {
 }
 
 .contenedor { max-width: 1500px; margin: 0 auto; }
+/* Páginas de tablas de muchas columnas: más anchas si la pantalla tiene hueco. */
+body[data-pagina="usuarios"] .contenedor,
+body[data-pagina="flows"] .contenedor { max-width: 1900px; }
 
 code {
   font-family: ui-monospace, "Cascadia Code", Consolas, monospace;

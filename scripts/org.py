@@ -352,6 +352,10 @@ class Org:
             }
         return _describes[clave]
 
+    def objetos(self):
+        """Los objetos del describe global del org, tal como los devuelve."""
+        return self._get("sobjects").get("sobjects", [])
+
     def picklist(self, objeto, campo):
         """Devuelve {valor: etiqueta} de un picklist, leido del describe del org."""
         for definicion in self._describe(objeto).get("fields", []):

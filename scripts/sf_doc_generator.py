@@ -482,6 +482,59 @@ document.querySelectorAll('.solo-activos').forEach(function (boton) {
 '''
 
 
+# ── Barra de progreso de una actualización ───────────────────────────────────
+
+# La comparten la página del objeto y el «Documentar objeto» del índice. Pinta el
+# estado que da /api/actualizacion: los pasos de la skill, el que va, la última
+# acción y el tiempo que lleva.
+PROGRESO_CSS = '''
+  .progreso { display: grid; gap: 5px; margin-top: 8px; font-size: 12px; }
+  .progreso[hidden] { display: none; }
+  .progreso-pasos { display: grid; grid-template-columns: repeat(var(--n), 1fr); gap: 4px; }
+  .progreso-paso { display: grid; gap: 3px; color: var(--text-muted); font-size: 11px; }
+  .progreso-paso::before { content: ''; height: 6px; border-radius: 3px; background: var(--border); }
+  .progreso-paso.hecho::before { background: var(--accent); }
+  .progreso-paso.actual { color: var(--text); font-weight: 600; }
+  .progreso-paso.actual::before { background: linear-gradient(90deg, var(--accent) 0 40%, var(--border) 40%);
+    background-size: 250% 100%; animation: progreso-avanza 1.2s linear infinite; }
+  @keyframes progreso-avanza { from { background-position: 100% 0; } to { background-position: 0 0; } }
+  .progreso-texto { color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  @media (prefers-reduced-motion: reduce) { .progreso-paso.actual::before { animation: none; } }
+'''
+
+PROGRESO_SCRIPT = r'''
+window.pintarProgreso = function (caja, e) {
+  var enCurso = e && (e.estado === 'en-cola' || e.estado === 'actualizando');
+  caja.hidden = !enCurso;
+  if (!enCurso) return;
+  var pasos = e.pasos || [];
+  var actual = e.estado === 'actualizando' ? Math.max(e.paso, 0) : -1;
+  var fila = document.createElement('div');
+  fila.className = 'progreso-pasos';
+  fila.style.setProperty('--n', pasos.length);
+  pasos.forEach(function (nombre, i) {
+    var paso = document.createElement('div');
+    paso.className = 'progreso-paso' + (i < actual ? ' hecho' : i === actual ? ' actual' : '');
+    paso.textContent = nombre;
+    fila.append(paso);
+  });
+  var texto = document.createElement('div');
+  texto.className = 'progreso-texto';
+  if (e.estado === 'en-cola') {
+    texto.textContent = 'En cola desde las ' + e.pedido + ': espera a que termine la que está en marcha.';
+  } else {
+    var partes = (e.inicio || '0:0:0').split(':').map(Number);
+    var inicio = new Date(); inicio.setHours(partes[0], partes[1], partes[2], 0);
+    var s = Math.max(0, Math.round((Date.now() - inicio) / 1000));
+    texto.textContent = 'Paso ' + (actual + 1) + ' de ' + pasos.length + ' · ' + Math.floor(s / 60) + ':' +
+      String(s % 60).padStart(2, '0') + (e.accion ? ' · ' + e.accion : '');
+    texto.title = e.accion || '';
+  }
+  caja.replaceChildren(fila, texto);
+};
+'''
+
+
 # ── Botón «Actualizar» de la página del objeto ───────────────────────────────
 
 # Habla con servir_documentator.py: pide la actualización con el org elegido y
@@ -494,6 +547,7 @@ UPDATE_SCRIPT = r'''
   var selector = document.getElementById('act-org');
   var boton = document.getElementById('act-boton');
   var estado = document.getElementById('act-estado');
+  var progreso = document.getElementById('act-progreso');
   var objeto = caja.dataset.objeto;
   var orgPagina = caja.dataset.org;
 
@@ -505,10 +559,11 @@ UPDATE_SCRIPT = r'''
     selector.disabled = enCurso;
     estado.classList.toggle('error', e.estado === 'error');
     estado.textContent =
-      e.estado === 'en-cola' ? 'En cola: desde ' + e.org + ', pedida a las ' + e.pedido + '…' :
-      e.estado === 'actualizando' ? 'Actualizando desde ' + e.org + ' (empezó a las ' + e.inicio + '). Tarda unos minutos…' :
+      e.estado === 'en-cola' ? 'En cola, desde ' + e.org :
+      e.estado === 'actualizando' ? 'Actualizando desde ' + e.org + '…' :
       e.estado === 'error' ? 'No se pudo actualizar desde ' + e.org + ': ' + e.mensaje :
       '';
+    window.pintarProgreso(progreso, e);
     if (enCurso) selector.value = e.org;
   }
 
@@ -520,7 +575,7 @@ UPDATE_SCRIPT = r'''
       .then(function (e) {
         if (e.estado === 'hecho') { if (!inicial) location.reload(); return; }
         pintar(e);
-        if (e.estado === 'en-cola' || e.estado === 'actualizando') setTimeout(function () { vigilar(false); }, 4000);
+        if (e.estado === 'en-cola' || e.estado === 'actualizando') setTimeout(function () { vigilar(false); }, 2000);
       })
       .catch(function () { setTimeout(function () { vigilar(inicial); }, 8000); });
   }
@@ -560,6 +615,187 @@ UPDATE_SCRIPT = r'''
 '''
 
 
+# ── Botón «Documentar objeto» del índice ─────────────────────────────────────
+
+# Lista los objetos del org elegido (/api/objetos) y documenta el que se pulse con
+# la misma cola que el «Actualizar» de cada página. Uno cada vez: mientras uno está
+# en marcha, la lista no deja lanzar otro. Abierto desde el disco no hay servidor
+# y el botón no aparece.
+INDEX_DOCUMENTAR_SCRIPT = r'''
+(function () {
+  var abrir = document.getElementById('doc-abrir');
+  var dialogo = document.getElementById('doc-dialogo');
+  if (location.protocol === 'file:' || !dialogo.showModal) return;
+  var selector = document.getElementById('doc-org');
+  var buscar = document.getElementById('doc-buscar');
+  var verDocumentados = document.getElementById('doc-ver-documentados');
+  var lista = document.getElementById('doc-lista');
+  var recuento = document.getElementById('doc-recuento');
+  var estado = document.getElementById('doc-estado');
+  var progreso = document.getElementById('doc-progreso');
+  var filtros = dialogo.querySelectorAll('[data-tipo]');
+  var cache = {};
+  var tipo = 'todos';
+  var enCurso = null;
+  var hecho = false;
+
+  function aviso(texto, clase) {
+    estado.className = 'doc-estado' + (clase ? ' ' + clase : '');
+    estado.textContent = texto;
+  }
+
+  function pintar() {
+    lista.textContent = '';
+    var datos = cache[selector.value];
+    if (!datos) { recuento.textContent = ''; return; }
+    var q = buscar.value.toLowerCase().trim();
+    var documentados = {};
+    datos.documentados.forEach(function (n) { documentados[n] = true; });
+    var visibles = 0;
+    datos.objetos.forEach(function (o) {
+      if (tipo === 'custom' && !o.custom) return;
+      if (tipo === 'estandar' && o.custom) return;
+      if (documentados[o.nombre] && !verDocumentados.checked) return;
+      if (q && (o.nombre + ' ' + o.etiqueta).toLowerCase().indexOf(q) === -1) return;
+      visibles++;
+      var boton = document.createElement('button');
+      boton.type = 'button';
+      boton.className = 'doc-objeto';
+      boton.disabled = !!enCurso;
+      var etiqueta = document.createElement('span');
+      etiqueta.textContent = o.etiqueta;
+      var nombre = document.createElement('code');
+      nombre.textContent = o.nombre;
+      boton.append(etiqueta, nombre);
+      if (documentados[o.nombre]) {
+        var marca = document.createElement('span');
+        marca.className = 'doc-marca';
+        marca.textContent = 'documentado';
+        boton.append(marca);
+      }
+      boton.addEventListener('click', function () { documentar(o.nombre); });
+      var fila = document.createElement('li');
+      fila.append(boton);
+      lista.append(fila);
+    });
+    recuento.textContent = visibles + ' de ' + datos.objetos.length + ' objetos';
+  }
+
+  function cargar() {
+    var alias = selector.value;
+    if (cache[alias]) { pintar(); return; }
+    lista.textContent = '';
+    recuento.textContent = '';
+    aviso('Consultando los objetos de ' + alias + '…');
+    fetch('/api/objetos?org=' + encodeURIComponent(alias), { cache: 'no-store' })
+      .then(function (r) { return r.json(); })
+      .then(function (datos) {
+        if (datos.error) throw new Error(datos.error);
+        cache[alias] = datos;
+        if (!enCurso) aviso('');
+        if (selector.value === alias) pintar();
+      })
+      .catch(function (error) { aviso('No se pudo leer la lista de ' + alias + ': ' + error.message, 'error'); });
+  }
+
+  function vigilar() {
+    fetch('/api/actualizacion?objeto=' + encodeURIComponent(enCurso.objeto), { cache: 'no-store' })
+      .then(function (r) { return r.json(); })
+      .then(function (e) {
+        window.pintarProgreso(progreso, e);
+        if (e.estado === 'en-cola' || e.estado === 'actualizando') {
+          aviso('Documentando ' + enCurso.objeto + ' desde ' + enCurso.org + '. Tarda unos minutos…');
+          abrir.textContent = 'Documentando ' + enCurso.objeto + '…';
+          setTimeout(vigilar, 2000);
+          return;
+        }
+        var objeto = enCurso.objeto;
+        enCurso = null;
+        selector.disabled = false;
+        abrir.textContent = 'Documentar objeto';
+        if (e.estado === 'hecho') {
+          hecho = true;
+          Object.keys(cache).forEach(function (a) { cache[a].documentados.push(objeto); });
+          estado.className = 'doc-estado ok';
+          estado.textContent = objeto + ' documentado. ';
+          var enlace = document.createElement('a');
+          enlace.href = objeto + '/' + objeto + '.html';
+          enlace.textContent = 'Abrir la página';
+          estado.append(enlace);
+        } else {
+          aviso('No se pudo documentar ' + objeto + ': ' + (e.mensaje || e.estado), 'error');
+        }
+        pintar();
+      })
+      .catch(function () { setTimeout(vigilar, 8000); });
+  }
+
+  function documentar(objeto) {
+    var alias = selector.value;
+    if (enCurso || !confirm('¿Documentar ' + objeto + ' desde ' + alias + '? Tarda unos minutos.')) return;
+    enCurso = { objeto: objeto, org: alias };
+    selector.disabled = true;
+    pintar();
+    aviso('Pidiendo la documentación de ' + objeto + '…');
+    fetch('/api/actualizar', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Documentator': '1' },
+      body: JSON.stringify({ objeto: objeto, org: alias })
+    })
+      .then(function (r) { return r.json(); })
+      .then(function (e) {
+        if (e.error) throw new Error(e.error);
+        vigilar();
+      })
+      .catch(function (error) {
+        enCurso = null;
+        selector.disabled = false;
+        aviso('No se pudo pedir la documentación de ' + objeto + ': ' + error.message, 'error');
+        pintar();
+      });
+  }
+
+  fetch('/api/config', { cache: 'no-store' })
+    .then(function (r) { return r.json(); })
+    .then(function (config) {
+      (config.orgs || []).forEach(function (alias) {
+        var opcion = document.createElement('option');
+        opcion.value = alias;
+        opcion.textContent = alias;
+        selector.append(opcion);
+      });
+      selector.value = config.org;
+      abrir.hidden = false;
+      // Si ya hay una en marcha (lanzada antes de recargar, o desde una página), se retoma.
+      return fetch('/api/actualizaciones', { cache: 'no-store' }).then(function (r) { return r.json(); });
+    })
+    .then(function (enMarcha) {
+      if (!enMarcha || !enMarcha.length || enCurso) return;
+      enCurso = { objeto: enMarcha[0].objeto, org: enMarcha[0].org };
+      selector.value = enCurso.org;
+      selector.disabled = true;
+      vigilar();
+    })
+    .catch(function () {});
+
+  abrir.addEventListener('click', function () { dialogo.showModal(); cargar(); buscar.focus(); });
+  document.getElementById('doc-cerrar').addEventListener('click', function () { dialogo.close(); });
+  // Al cerrar tras documentar algo, el índice se recarga para que salga en la tabla.
+  dialogo.addEventListener('close', function () { if (hecho && !enCurso) location.reload(); });
+  selector.addEventListener('change', cargar);
+  buscar.addEventListener('input', pintar);
+  verDocumentados.addEventListener('change', pintar);
+  filtros.forEach(function (b) {
+    b.addEventListener('click', function () {
+      filtros.forEach(function (x) { x.classList.toggle('activo', x === b); });
+      tipo = b.dataset.tipo;
+      pintar();
+    });
+  });
+})();
+'''
+
+
 # ── Index management ─────────────────────────────────────────────────────────
 
 # Páginas que consultan el org al abrirlas: las sirve servir_documentator.py y no
@@ -572,7 +808,7 @@ LIVE_PAGES = [
 ]
 
 
-def update_index(output_dir, object_name, stats):
+def update_index(output_dir, object_name, stats, fecha=None, escribir_indice=True):
     manifest_path = os.path.join(output_dir, 'manifest.json')
     if os.path.exists(manifest_path):
         with open(manifest_path, encoding='utf-8') as f:
@@ -590,14 +826,15 @@ def update_index(output_dir, object_name, stats):
         'validations': stats['validations'],
         'flows': stats['flows'],
         'triggers': stats.get('triggers', 0),
-        'date': datetime.now().strftime('%Y-%m-%d %H:%M'),
+        'date': fecha or datetime.now().strftime('%Y-%m-%d %H:%M'),
     })
     manifest.sort(key=lambda e: e['object'])
 
     with open(manifest_path, 'w', encoding='utf-8') as f:
         json.dump(manifest, f, indent=2, ensure_ascii=False)
 
-    write_index(output_dir, manifest)
+    if escribir_indice:
+        write_index(output_dir, manifest)
 
 
 def write_index(output_dir, manifest=None):
@@ -645,7 +882,8 @@ def write_index(output_dir, manifest=None):
 <style>
   *, *::before, *::after {{ box-sizing: border-box; margin: 0; padding: 0; }}
   :root {{ --bg:#f4f6f9; --surface:#fff; --surface2:#f3f4f6; --border:#e0e0e0; --border-light:#f0f0f0; --text:#1a1a2e; --text-muted:#5a6474; --accent:#0070d2; --hover-bg:#f0f7ff; }}
-  [data-theme="dark"] {{ --bg:#0d1117; --surface:#161b22; --surface2:#21262d; --border:#30363d; --border-light:#21262d; --text:#e6edf3; --text-muted:#8b949e; --accent:#58a6ff; --hover-bg:#1c2128; }}
+  :root {{ color-scheme: light; }}
+  [data-theme="dark"] {{ color-scheme: dark; --bg:#0d1117; --surface:#161b22; --surface2:#21262d; --border:#30363d; --border-light:#21262d; --text:#e6edf3; --text-muted:#8b949e; --accent:#58a6ff; --hover-bg:#1c2128; }}
   body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; font-size: 14px; background: var(--bg); color: var(--text); padding: 32px; }}
   .container {{ max-width: 900px; margin: 0 auto; }}
   header {{ background: linear-gradient(135deg, #0070d2, #1589ee); color: #fff; padding: 28px 32px; border-radius: 8px 8px 0 0; display:flex; align-items:center; justify-content:space-between; }}
@@ -667,6 +905,36 @@ def write_index(output_dir, manifest=None):
   .live ul {{ list-style: none; display: grid; gap: 8px; padding: 16px 24px; }}
   .servidor {{ padding: 0 24px 16px; color: var(--text-muted); font-size: 13px; }}
   .servidor code {{ display: block; margin-top: 6px; padding: 8px 12px; background: var(--surface2); border: 1px solid var(--border); border-radius: 6px; color: var(--text); font-size: 12px; user-select: all; overflow-wrap: anywhere; }}
+  .cabecera-botones {{ display: flex; gap: 8px; align-items: center; }}
+  .doc-abrir {{ padding: 7px 12px; border: 1px solid rgba(255,255,255,0.6); border-radius: 6px; background: #fff; color: #0070d2; font-weight: 600; font-size: 13px; cursor: pointer; }}
+  .doc-abrir:hover {{ background: #eef5ff; }}
+  dialog.doc-dialogo {{ margin: auto; width: min(760px, calc(100vw - 32px)); max-height: calc(100vh - 64px); padding: 0; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); color: var(--text); box-shadow: 0 12px 40px rgba(0,0,0,0.3); }}
+  dialog.doc-dialogo::backdrop {{ background: rgba(0,0,0,0.45); }}
+  .doc-caja {{ display: flex; flex-direction: column; max-height: calc(100vh - 66px); }}
+  .doc-cabecera {{ display: flex; align-items: center; justify-content: space-between; padding: 14px 20px; background: linear-gradient(135deg, #0070d2, #1589ee); color: #fff; }}
+  .doc-cabecera h2 {{ font-size: 16px; }}
+  .doc-cerrar {{ border: 0; background: transparent; color: #fff; font-size: 20px; line-height: 1; cursor: pointer; }}
+  .doc-controles {{ display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; padding: 12px 20px; border-bottom: 1px solid var(--border); }}
+  .doc-controles select, .doc-controles input[type=search] {{ padding: 6px 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); color: var(--text); font: inherit; font-size: 13px; }}
+  .doc-controles input[type=search] {{ flex: 1 1 200px; }}
+  .doc-filtros {{ display: inline-flex; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }}
+  .doc-filtros button {{ padding: 6px 10px; border: 0; background: var(--surface); color: var(--text-muted); font: inherit; font-size: 13px; cursor: pointer; }}
+  .doc-filtros button + button {{ border-left: 1px solid var(--border); }}
+  .doc-filtros button.activo {{ background: var(--accent); color: #fff; }}
+  .doc-check {{ font-size: 13px; color: var(--text-muted); display: inline-flex; gap: 5px; align-items: center; }}
+  .doc-recuento {{ font-size: 12px; color: var(--text-muted); margin-left: auto; }}
+  .doc-estado {{ padding: 0 20px; font-size: 13px; color: var(--text-muted); }}
+  .doc-estado:not(:empty) {{ padding: 10px 20px; border-bottom: 1px solid var(--border); }}
+  .doc-estado.error {{ color: #d1242f; }}
+  .doc-estado.ok {{ color: #1a7f37; }}
+  ul.doc-lista {{ list-style: none; overflow-y: auto; padding: 6px 12px 12px; scrollbar-width: thin; scrollbar-color: var(--border) transparent; }}
+  .doc-objeto {{ display: flex; width: 100%; gap: 10px; align-items: baseline; padding: 7px 10px; border: 0; border-radius: 6px; background: transparent; color: var(--text); font: inherit; font-size: 13px; text-align: left; cursor: pointer; }}
+  .doc-objeto:hover:not(:disabled) {{ background: var(--hover-bg); }}
+  .doc-objeto:disabled {{ cursor: default; opacity: 0.5; }}
+  .doc-objeto code {{ color: var(--text-muted); font-size: 12px; }}
+{PROGRESO_CSS}
+  .doc-progreso {{ padding: 0 20px 10px; }}
+  .doc-marca {{ margin-left: auto; font-size: 11px; color: var(--text-muted); border: 1px solid var(--border); border-radius: 10px; padding: 0 7px; }}
 </style>
 </head>
 <body>
@@ -676,8 +944,33 @@ def write_index(output_dir, manifest=None):
       <h1>Salesforce Object Documentation</h1>
       <p>{len(manifest)} objeto{'s' if len(manifest) != 1 else ''} documentado{'s' if len(manifest) != 1 else ''}</p>
     </div>
-    <button id="dm-toggle" class="dm-toggle" title="Cambiar tema">🌙</button>
+    <div class="cabecera-botones">
+      <button type="button" id="doc-abrir" class="doc-abrir" hidden>Documentar objeto</button>
+      <button id="dm-toggle" class="dm-toggle" title="Cambiar tema">🌙</button>
+    </div>
   </header>
+  <dialog class="doc-dialogo" id="doc-dialogo" aria-labelledby="doc-titulo">
+    <div class="doc-caja">
+      <div class="doc-cabecera">
+        <h2 id="doc-titulo">Documentar objeto</h2>
+        <button type="button" class="doc-cerrar" id="doc-cerrar" title="Cerrar">×</button>
+      </div>
+      <div class="doc-controles">
+        <label class="doc-check">Org <select id="doc-org" aria-label="Org"></select></label>
+        <input type="search" id="doc-buscar" placeholder="Buscar por nombre o etiqueta…" autocomplete="off">
+        <div class="doc-filtros" role="group" aria-label="Tipo de objeto">
+          <button type="button" data-tipo="todos" class="activo">Todos</button>
+          <button type="button" data-tipo="estandar">Estándar</button>
+          <button type="button" data-tipo="custom">Custom</button>
+        </div>
+        <label class="doc-check"><input type="checkbox" id="doc-ver-documentados"> Ver ya documentados</label>
+        <span class="doc-recuento" id="doc-recuento"></span>
+      </div>
+      <div class="doc-estado" id="doc-estado" role="status" aria-live="polite"></div>
+      <div class="progreso doc-progreso" id="doc-progreso" hidden></div>
+      <ul class="doc-lista" id="doc-lista"></ul>
+    </div>
+  </dialog>
   <table>
     <thead>
       <tr><th>Objeto</th><th>Campos</th><th>Custom</th><th>Validaciones</th><th>Flows</th><th>Triggers</th><th>Generado</th></tr>
@@ -707,6 +1000,8 @@ if(location.protocol==='file:')document.getElementById('servidor').hidden=false;
   }});
 }})();
 </script>
+<script>{PROGRESO_SCRIPT}</script>
+<script>{INDEX_DOCUMENTAR_SCRIPT}</script>
 </body>
 </html>'''
 
@@ -718,8 +1013,47 @@ if(location.protocol==='file:')document.getElementById('servidor').hidden=false;
 
 # ── Main HTML generator ──────────────────────────────────────────────────────
 
+# Todo lo que pinta la página de un objeto se guarda en documentator/<Objeto>/_datos.json:
+# con él, `--rehacer` vuelve a pintar las páginas sin consultar el org ni a Claude.
+DATOS = '_datos.json'
+
+
+def _leer_json(ruta, vacio):
+    if ruta and os.path.exists(ruta):
+        with open(ruta, encoding='utf-8-sig') as f:
+            return json.load(f)
+    return vacio
+
+
 def generate_html(object_name, org_alias, output_dir, explanations_file=None, triggers_file=None,
                   flow_desc_file=None, review_file=None):
+    datos = recoger_objeto(object_name, org_alias, explanations_file, triggers_file, flow_desc_file, review_file)
+    object_dir = os.path.join(output_dir, object_name)
+    os.makedirs(object_dir, exist_ok=True)
+    with open(os.path.join(object_dir, DATOS), 'w', encoding='utf-8') as f:
+        json.dump(datos, f, ensure_ascii=False)
+    return pintar_objeto(output_dir, datos)
+
+
+def rehacer_paginas(output_dir):
+    """Vuelve a pintar las páginas del manifiesto desde su _datos.json, sin consultar nada."""
+    manifest_path = os.path.join(output_dir, 'manifest.json')
+    manifest = _leer_json(manifest_path, [])
+    sin_datos = []
+    for entrada in manifest:
+        datos = _leer_json(os.path.join(output_dir, entrada['object'], DATOS), None)
+        if datos is None:
+            sin_datos.append(entrada['object'])
+            continue
+        pintar_objeto(output_dir, datos, escribir_indice=False)
+    write_index(output_dir)
+    if sin_datos:
+        print("Sin " + DATOS + " (hay que documentarlos una vez desde el org): " + ', '.join(sin_datos))
+    return sin_datos
+
+
+def recoger_objeto(object_name, org_alias, explanations_file=None, triggers_file=None,
+                   flow_desc_file=None, review_file=None):
     print(f"Describing {object_name} on {org_alias}...")
     describe_data = run_sf_describe(object_name, org_alias)
     describe_result = describe_data['result']
@@ -737,44 +1071,47 @@ def generate_html(object_name, org_alias, output_dir, explanations_file=None, tr
     trigger_order = {'RecordBeforeSave': 0, 'RecordAfterSave': 1, 'RecordBeforeDelete': 2}
     flows.sort(key=lambda f: trigger_order.get(f.get('TriggerType', ''), 99))
 
+    if explanations_file and os.path.exists(explanations_file):
+        print(f"Loading formula explanations from {explanations_file}...")
+        formula_explanations = _leer_json(explanations_file, {})
+    else:
+        print("Getting formula explanations...")
+        formula_explanations = get_formula_explanations([f for f in fields if f.get('calculated')], object_name)
+
+    return {
+        'object': object_name,
+        'org': org_alias,
+        'generated': datetime.now().strftime('%Y-%m-%d %H:%M'),
+        'fields': fields,
+        'descriptions': descriptions,
+        'validationRules': val_rules,
+        'flows': flows,
+        'formulaExplanations': formula_explanations,
+        'triggers': _leer_json(triggers_file, []),
+        'flowDescriptions': _leer_json(flow_desc_file, {}),
+        'review': _leer_json(review_file, []),
+    }
+
+
+def pintar_objeto(output_dir, datos, escribir_indice=True):
+    object_name = datos['object']
+    org_alias = datos['org']
+    fields = datos['fields']
+    descriptions = datos['descriptions']
+    val_rules = datos['validationRules']
+    flows = datos['flows']
+    formula_explanations = datos['formulaExplanations']
+    apex_triggers = datos['triggers']
+    flow_descriptions = datos['flowDescriptions']
+    review_items = datos['review']
+
     total = len(fields)
     custom_count = sum(1 for f in fields if f['name'].endswith('__c'))
     standard_count = total - custom_count
     picklist_count = sum(1 for f in fields if f['type'] == 'picklist')
-    formula_fields = [f for f in fields if f.get('calculated')]
-    formula_count = len(formula_fields)
+    formula_count = sum(1 for f in fields if f.get('calculated'))
     required_count = sum(1 for f in fields if is_required(f))
-
-    if explanations_file and os.path.exists(explanations_file):
-        print(f"Loading formula explanations from {explanations_file}...")
-        with open(explanations_file, encoding='utf-8-sig') as f:
-            formula_explanations = json.load(f)
-    else:
-        print("Getting formula explanations...")
-        formula_explanations = get_formula_explanations(formula_fields, object_name)
-
-    if triggers_file and os.path.exists(triggers_file):
-        print(f"Loading trigger summary from {triggers_file}...")
-        with open(triggers_file, encoding='utf-8-sig') as f:
-            apex_triggers = json.load(f)
-    else:
-        apex_triggers = []
-
     trigger_count = len([t for t in apex_triggers if t.get('status') == 'active'])
-
-    if flow_desc_file and os.path.exists(flow_desc_file):
-        print(f"Loading flow descriptions from {flow_desc_file}...")
-        with open(flow_desc_file, encoding='utf-8-sig') as f:
-            flow_descriptions = json.load(f)
-    else:
-        flow_descriptions = {}
-
-    if review_file and os.path.exists(review_file):
-        print(f"Loading review notes from {review_file}...")
-        with open(review_file, encoding='utf-8-sig') as f:
-            review_items = json.load(f)
-    else:
-        review_items = []
 
     sections = categorize_fields(fields)
     rows_html = build_field_rows(sections, descriptions, formula_explanations)
@@ -782,7 +1119,8 @@ def generate_html(object_name, org_alias, output_dir, explanations_file=None, tr
     flows_html = build_flows_html(flows, flow_descriptions)
     triggers_html = build_triggers_html(apex_triggers)
     review_html = build_review_html(review_items)
-    now = datetime.now().strftime('%Y-%m-%d %H:%M')
+    # La fecha es la de la consulta al org, no la de pintar: rehacer no la mueve.
+    now = datos['generated']
 
     html = f'''<!DOCTYPE html>
 <html lang="es">
@@ -806,7 +1144,10 @@ def generate_html(object_name, org_alias, output_dir, explanations_file=None, tr
     --fbtn-bg:#fffbe6; --fbtn-color:#b07a00; --fbtn-border:#f5d000;
     --fbtn-hover:#fff3b0; --fbtn-open-bg:#f5d000; --fbtn-open-color:#5a3e00;
   }}
+  /* color-scheme: sin él el navegador pinta las barras de scroll en claro también en el tema oscuro. */
+  :root {{ color-scheme: light; }}
   [data-theme="dark"] {{
+    color-scheme: dark;
     --bg:#0d1117; --surface:#161b22; --surface2:#21262d;
     --border:#30363d; --border-light:#21262d;
     --text:#e6edf3; --text-muted:#8b949e; --text-dim:#8b949e;
@@ -853,6 +1194,14 @@ def generate_html(object_name, org_alias, output_dir, explanations_file=None, tr
   .actualizar button:hover {{ background: rgba(255,255,255,0.3); }}
   .actualizar button:disabled {{ opacity: 0.55; cursor: default; }}
   .actualizar-estado {{ opacity: 0.95; }}
+{PROGRESO_CSS}
+  /* Sobre el degradado azul de la cabecera, la barra va en blanco. */
+  .progreso.en-cabecera {{ max-width: 720px; }}
+  .progreso.en-cabecera .progreso-paso, .progreso.en-cabecera .progreso-texto {{ color: rgba(255,255,255,0.8); }}
+  .progreso.en-cabecera .progreso-paso.actual {{ color: #fff; }}
+  .progreso.en-cabecera .progreso-paso::before {{ background: rgba(255,255,255,0.3); }}
+  .progreso.en-cabecera .progreso-paso.hecho::before {{ background: #fff; }}
+  .progreso.en-cabecera .progreso-paso.actual::before {{ background: linear-gradient(90deg, #fff 0 40%, rgba(255,255,255,0.3) 40%); background-size: 250% 100%; }}
   .actualizar-estado.error {{ background: rgba(180,20,20,0.85); padding: 3px 9px; border-radius: 6px; }}
   .actualizar-nota {{ margin-top: 14px; font-size: 12px; opacity: 0.85; }}
 
@@ -1073,7 +1422,8 @@ def generate_html(object_name, org_alias, output_dir, explanations_file=None, tr
 
   ul.picklist-values {{ list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 3px; }}
   /* Con muchos valores la fila se haría larguísima: pasado este alto, scroll dentro de la celda. */
-  ul.picklist-values {{ max-height: 220px; overflow-y: auto; padding-right: 6px; }}
+  ul.picklist-values {{ max-height: 220px; overflow-y: auto; padding-right: 6px;
+    scrollbar-width: thin; scrollbar-color: var(--border) transparent; }}
   ul.picklist-values li {{ display: flex; align-items: baseline; gap: 6px; font-size: 12px; line-height: 1.4; }}
   ul.picklist-values .arrow {{ color: var(--text-muted); font-size: 11px; flex-shrink: 0; }}
   ul.picklist-values code {{ font-size: 11px; }}
@@ -1098,6 +1448,23 @@ def generate_html(object_name, org_alias, output_dir, explanations_file=None, tr
   }}
 
   .section-title span {{ font-size: 12px; font-weight: 400; opacity: 0.75; margin-left: 8px; }}
+
+  /* Secciones plegables: el título es el <summary> y la flecha marca si está abierta. */
+  summary.section-title {{ cursor: pointer; list-style: none; user-select: none; }}
+  summary.section-title::-webkit-details-marker {{ display: none; }}
+  summary.section-title::before {{
+    content: '▸'; display: inline-block; width: 1em; margin-right: 6px;
+    transition: transform 0.15s;
+  }}
+  details[open] > summary.section-title::before {{ transform: rotate(90deg); }}
+  /* La tabla de campos sigue pegada a la cabecera y sin overflow: con overflow: hidden
+     la cabecera de la tabla dejaría de quedarse fija al hacer scroll. */
+  details.campos-block > summary.section-title {{ border-top: 1px solid rgba(255,255,255,0.25); }}
+  details.campos-block:not([open]) > summary.section-title {{ border-radius: 0 0 8px 8px; }}
+  .cabecera-fila {{ display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }}
+  header .dm-toggle {{ margin-left: 0; border-color: rgba(255,255,255,0.4); background: rgba(255,255,255,0.15); color: #fff; }}
+  header .dm-toggle:hover {{ background: rgba(255,255,255,0.25); }}
+  summary.section-title:focus-visible {{ outline: 2px solid #fff; outline-offset: -4px; }}
 
   table.secondary-table {{
     width: 100%;
@@ -1206,7 +1573,10 @@ def generate_html(object_name, org_alias, output_dir, explanations_file=None, tr
   <a class="back" href="../index.html">← Volver al índice</a>
 
   <header>
-    <h1>{escape(object_name)} <span>Salesforce Object</span></h1>
+    <div class="cabecera-fila">
+      <h1>{escape(object_name)} <span>Salesforce Object</span></h1>
+      <button id="dm-toggle" class="dm-toggle" title="Cambiar tema">🌙</button>
+    </div>
     <div class="meta">
       <div>Total <strong class="badge">{total}</strong></div>
       <div>Estándar <strong class="badge">{standard_count}</strong></div>
@@ -1222,11 +1592,14 @@ def generate_html(object_name, org_alias, output_dir, explanations_file=None, tr
       <button type="button" id="act-boton">Actualizar</button>
       <span class="actualizar-estado" id="act-estado" role="status" aria-live="polite"></span>
     </div>
+    <div class="progreso en-cabecera" id="act-progreso" hidden></div>
     <div class="actualizar-nota" id="act-nota" hidden>
       Para actualizar desde aquí, abre la documentación con su servidor (<code>servir_documentator.py</code>, junto al generador).
     </div>
   </header>
 
+  <details class="campos-block" open>
+  <summary class="section-title">Campos <span>{total} campo{'s' if total != 1 else ''}</span></summary>
   <div class="toolbar">
     <div class="search-wrap">
       <input type="text" id="search" placeholder="Buscar campo…" autocomplete="off">
@@ -1240,7 +1613,6 @@ def generate_html(object_name, org_alias, output_dir, explanations_file=None, tr
       <button class="filter-btn" data-filter="required">Requerido</button>
     </div>
     <span class="count-label">Mostrando <strong id="visible-count">{total}</strong> de {total}</span>
-    <button id="dm-toggle" class="dm-toggle" title="Cambiar tema">🌙</button>
   </div>
 
   <table class="main-table">
@@ -1257,34 +1629,35 @@ def generate_html(object_name, org_alias, output_dir, explanations_file=None, tr
 {rows_html}
     </tbody>
   </table>
+  </details>
 
   <!-- Validation Rules -->
-  <div class="section-block">
-    <div class="section-title">Reglas de validación <span>{len(val_rules)} regla{'s' if len(val_rules) != 1 else ''}</span></div>
+  <details class="section-block" open>
+    <summary class="section-title">Reglas de validación <span>{len(val_rules)} regla{'s' if len(val_rules) != 1 else ''}</span></summary>
     {val_html}
-  </div>
+  </details>
 
   <!-- Record-Triggered Flows -->
-  <div class="section-block">
-    <div class="section-title">Record-Triggered Flows <span>{len(flows)} flow{'s' if len(flows) != 1 else ''}</span></div>
+  <details class="section-block" open>
+    <summary class="section-title">Record-Triggered Flows <span>{len(flows)} flow{'s' if len(flows) != 1 else ''}</span></summary>
     {flows_html}
-  </div>
+  </details>
 
   <!-- Apex Triggers -->
-  <div class="section-block">
-    <div class="section-title">Apex Triggers <span>{len(apex_triggers)} trigger{'s' if len(apex_triggers) != 1 else ''}</span></div>
+  <details class="section-block" open>
+    <summary class="section-title">Apex Triggers <span>{len(apex_triggers)} trigger{'s' if len(apex_triggers) != 1 else ''}</span></summary>
     {triggers_html}
-  </div>
+  </details>
 
   <!-- Revisar -->
-  <div class="section-block review-block">
-    <div class="section-title">Revisar <span>{len(review_items)} observaci{'ones' if len(review_items) != 1 else 'ón'}</span></div>
+  <details class="section-block review-block" open>
+    <summary class="section-title">Revisar <span>{len(review_items)} observaci{'ones' if len(review_items) != 1 else 'ón'}</span></summary>
     <div class="review-disclaimer">
       Observaciones generadas automáticamente al analizar el objeto. <strong>No están verificadas</strong>:
       contrástalas antes de actuar y no las cites como decisión de arquitectura.
     </div>
     {review_html}
-  </div>
+  </details>
 
 </div>
 
@@ -1376,6 +1749,7 @@ def generate_html(object_name, org_alias, output_dir, explanations_file=None, tr
 }})();
 </script>
 <script>{ACTIVE_FILTER_SCRIPT}</script>
+<script>{PROGRESO_SCRIPT}</script>
 <script>{UPDATE_SCRIPT}</script>
 </body>
 </html>'''
@@ -1393,7 +1767,7 @@ def generate_html(object_name, org_alias, output_dir, explanations_file=None, tr
         'validations': len(val_rules),
         'flows': len(flows),
         'triggers': trigger_count,
-    })
+    }, fecha=now, escribir_indice=escribir_indice)
 
     return output_path
 
@@ -1415,6 +1789,11 @@ if __name__ == '__main__':
         out = os.path.join(os.getcwd(), 'documentator')
         os.makedirs(out, exist_ok=True)
         write_index(out)
+        sys.exit(0)
+
+    # Vuelve a pintar todas las páginas con la plantilla actual, desde lo guardado.
+    if sys.argv[1:] == ['--rehacer']:
+        rehacer_paginas(os.path.join(os.getcwd(), 'documentator'))
         sys.exit(0)
 
     if len(sys.argv) < 3:
