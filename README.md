@@ -12,11 +12,11 @@ Skill para Claude Code que genera documentación HTML interactiva de cualquier o
 - **Record-Triggered Flows** — tipo de trigger, estado, versión y descripción, con filtro «Solo activos». Los flows sin descripción propia reciben una generada por IA a partir de su versión activa, marcada como `IA`.
 - **Apex Triggers** — detecta el patrón TriggerFactory y los handlers directos, y lista cada método por contexto, agrupado por operación (insert, update, delete…).
 - **Revisar** — observaciones automáticas sobre el objeto (solapamiento de flows y triggers, automatización muerta, fórmulas problemáticas, metadata sin documentar), marcadas como no verificadas.
-- **Botón Actualizar con selector de org** — regenera la página desde el org elegido sin tener que pedírselo a Claude (ver «Cómo funciona»).
+- **Botón Actualizar con selector de org** — regenera la página desde el org elegido sin tener que pedírselo a Claude, con una barra que enseña por qué paso va (ver «Cómo funciona»).
 - **Búsqueda y filtros** — búsqueda en tiempo real por API name o label; filtros por tipo (estándar, custom, picklist, fórmula, requerido).
 - **Modo oscuro** — interruptor común a todas las páginas, guardado en `localStorage`.
 - **Cachés** — las explicaciones de fórmulas se cachean por fórmula y las descripciones de flows por versión: solo se regenera lo que ha cambiado.
-- **Índice** — `index.html` con todos los objetos documentados y enlaces a las páginas en vivo.
+- **Índice** — `index.html` con todos los objetos documentados y enlaces a las páginas en vivo. Su botón **Documentar objeto** lista los objetos del org elegido y documenta el que se pulse, sin pedírselo a Claude (ver «Cómo funciona»).
 
 ### Páginas en vivo (Salesforce Configuration)
 
@@ -153,9 +153,19 @@ documentator/
 ├── Account/
 │   ├── Account.html
 │   ├── _formula_cache.json         # Caché persistente de fórmulas (no borrar)
-│   └── _flow_cache.json            # Caché persistente de flows (no borrar)
+│   ├── _flow_cache.json            # Caché persistente de flows (no borrar)
+│   └── _datos.json                 # Todo lo que pinta la página (no borrar)
+├── _vivo/                          # Última consulta de Omni-Channel, un fichero por org
 └── ...
 ```
+
+`_datos.json` guarda todo lo que pinta la página del objeto: el describe, las reglas, los flows, las explicaciones, los triggers y las observaciones. Con él, un cambio de la plantilla —estilos, estructura, scripts— llega a todas las páginas sin volver al org ni a Claude:
+
+```bash
+python <ruta-del-skill>/scripts/sf_doc_generator.py --rehacer
+```
+
+Repinta cada objeto del manifiesto desde su `_datos.json`, conserva la fecha de la consulta y lista los que no lo tienen todavía, que hay que documentar una vez desde el org.
 
 ## Cómo funciona
 
@@ -167,7 +177,9 @@ documentator/
 4. **Revisar** — anota lo que llama la atención del objeto completo.
 5. **Generación** — el generador consulta el org (describe, descripciones de campo, reglas de validación y flows), combina todo en un HTML autocontenido, actualiza el índice y borra sus temporales.
 
-**El botón Actualizar** de una página de objeto pide al servidor que repita esos pasos con el org del selector. El servidor lanza Claude Code sin interfaz (`claude -p`) con una lista cerrada de herramientas: leer el repo, escribir solo en `documentator/`, consultar el org en lectura y ejecutar el generador. Lo demás se deniega sin preguntar. Las actualizaciones van de una en una, y la página se recarga sola cuando termina la suya.
+**El botón Actualizar** de una página de objeto pide al servidor que repita esos pasos con el org del selector. El servidor lanza Claude Code sin interfaz (`claude -p`) con una lista cerrada de herramientas: leer el repo, escribir solo en `documentator/`, consultar el org en lectura y ejecutar el generador. Lo demás se deniega sin preguntar. Las actualizaciones van de una en una, y la página se recarga sola cuando termina la suya. Mientras corre, enseña una barra con los pasos (Fórmulas, Flows, Triggers, Revisar, Página), el que va, la última acción y el tiempo.
+
+**El botón Documentar objeto** del índice abre una ventana con los objetos del org elegido, con buscador y filtros Estándar / Custom. Deja fuera los técnicos: los que no tienen formato de página (History, Share, Feed, ChangeEvent), las custom settings y los de sufijo `__mdt`, `__e`, `__b`, `__x` y similares. Los ya documentados salen ocultos salvo que se marque «Ver ya documentados». El que se pulsa se documenta con la misma cola que **Actualizar**, de uno en uno: mientras uno está en marcha, la lista no deja lanzar otro. Como **Actualizar**, necesita el servidor: abierto el índice desde el disco, el botón no aparece.
 
 **Las páginas en vivo** toman prestada la sesión de la CLI una vez por org y a partir de ahí consultan por la API REST, que es mucho más rápido que lanzar la CLI en cada consulta. No guardan credenciales propias.
 
