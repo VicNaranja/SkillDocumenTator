@@ -251,13 +251,13 @@ Y que la página se abre con el servidor (ver «Servidor y botón Actualizar»):
 
 ## Servidor y botón Actualizar
 
-`scripts/servir_documentator.py` sirve `documentator/` en `http://127.0.0.1:8788/`, junto con las páginas en vivo. Se arranca desde la raíz del proyecto:
+`scripts/servir_documentator.py` sirve `documentator/` en `http://127.0.0.1:8788/` (o el siguiente puerto libre, ver abajo), junto con las páginas en vivo. Se arranca desde la raíz del proyecto:
 
 ```bash
 python "<RUTA_SCRIPTS>/servir_documentator.py" --org ORG_ALIAS --abrir <ruta>
 ```
 
-`--abrir` es la ruta que abre en el navegador (`VoiceCall/VoiceCall.html`, `vivo/usuarios`…); sin ella, el índice. Antes de arrancarlo, mira si ya está levantado pidiendo `http://127.0.0.1:8788/api/config`: si responde, no lances otro, abre la URL en el navegador. Si no, lánzalo **en segundo plano**, porque no termina hasta Ctrl+C.
+`--abrir` es la ruta que abre en el navegador (`VoiceCall/VoiceCall.html`, `vivo/usuarios`…); sin ella, el índice. Lánzalo **en segundo plano**, porque no termina hasta Ctrl+C, y da al usuario la URL que imprime. Antes de arrancar, el script pregunta a `/api/config` en el puerto, que devuelve la carpeta del proyecto que sirve. Si es el documentator de este mismo proyecto, abre esa URL y termina sin levantar otro. Si es el de otro proyecto u otra cosa, avisa y prueba el siguiente puerto: con dos proyectos abiertos, cada uno tiene que ver su `documentator/`, y en Windows un segundo servidor no falla al enlazar un puerto ocupado, arranca y se reparte las peticiones con el primero.
 
 Cada página de objeto tiene en la cabecera un selector de org y el botón **Actualizar**. El selector solo dice de qué org sale la siguiente actualización; la página que se ve es siempre la última generada, con su org y su fecha en la cabecera. Al pulsar, el servidor lanza Claude Code sin interfaz (`claude -p`) con esta skill para ese objeto y ese org, y la página se recarga cuando termina. Las actualizaciones van de una en una, porque todas reescriben el índice y el manifiesto: las que se piden mientras otra corre esperan en cola. Mientras corre, la página enseña una barra con los pasos (Fórmulas, Flows, Triggers, Revisar, Página), el que va, la última acción y el tiempo: el servidor lee la salida de la sesión en `stream-json` y deduce el paso de cada herramienta que usa (`PASOS` y `_paso_de` en `servir_documentator.py`).
 

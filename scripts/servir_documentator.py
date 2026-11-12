@@ -36,6 +36,7 @@ import datetime
 import http.server
 import json
 import mimetypes
+import os
 import pathlib
 import queue
 import re
@@ -43,7 +44,9 @@ import shutil
 import subprocess
 import threading
 import traceback
+import urllib.error
 import urllib.parse
+import urllib.request
 import webbrowser
 
 import org as modulo_org
@@ -55,6 +58,44 @@ PLANTILLA = BASE / "plantilla"
 SKILL = BASE.parent / "SKILL.md"
 
 PUERTO_POR_DEFECTO = 8788
+
+
+def servidor_en(puerto):
+    """
+    El /api/config de lo que responde en el puerto; {} si responde algo que no es un
+    documentator, y None si el puerto esta libre.
+    """
+    try:
+        with urllib.request.urlopen("http://127.0.0.1:{}/api/config".format(puerto), timeout=3) as respuesta:
+            config = json.load(respuesta)
+            return config if isinstance(config, dict) else {}
+    except urllib.error.URLError as error:
+        return {} if isinstance(error, urllib.error.HTTPError) else None
+    except (OSError, ValueError):
+        return {}
+
+
+def elegir_puerto(desde, raiz):
+    """
+    Devuelve (puerto, ya_levantado). Un puerto ocupado nunca se comparte: en Windows
+    un segundo servidor no falla al enlazarlo, arranca y se reparte las peticiones
+    con el primero. Si en el ya sirve el documentator de esta misma carpeta, se
+    reutiliza; si es el de otro proyecto, se prueba el siguiente.
+    """
+    for puerto in range(desde, desde + 10):
+        config = servidor_en(puerto)
+        if config is None:
+            return puerto, False
+        suya = config.get("raiz")
+        if suya and os.path.normcase(suya) == os.path.normcase(str(raiz)):
+            return puerto, True
+        if suya:
+            print("  El puerto {} lo ocupa el documentator de {}.".format(puerto, suya))
+        elif "orgs" in config:
+            print("  El puerto {} lo ocupa un documentator anterior que no dice de qué proyecto es.".format(puerto))
+        else:
+            print("  El puerto {} lo ocupa otro servicio.".format(puerto))
+    raise SystemExit("No hay ningún puerto libre entre {} y {}.".format(desde, desde + 9))
 
 # Una actualizacion es una sesion entera de la skill: con muchas formulas y flows
 # nuevos tarda minutos, pero mas de esto es que se ha quedado colgada.
@@ -409,7 +450,9 @@ class Manejador(http.server.BaseHTTPRequestHandler):
         return self._responder(destino.read_bytes(), tipo, 200)
 
     def _config(self):
-        return {"org": self.org_por_defecto, "orgs": modulo_org.alias_disponibles()}
+        # La raiz identifica el proyecto: con dos abiertos, el que arranca despues
+        # la compara para no reutilizar el documentator del otro.
+        return {"org": self.org_por_defecto, "orgs": modulo_org.alias_disponibles(), "raiz": str(self.raiz)}
 
     def _datos(self, consulta):
         alias = (consulta.get("org") or [self.org_por_defecto])[0]
@@ -502,6 +545,14 @@ def main():
     argumentos = parser.parse_args()
 
     raiz = pathlib.Path(argumentos.raiz).resolve()
+
+    puerto, ya_levantado = elegir_puerto(argumentos.puerto, raiz)
+    url = "http://127.0.0.1:{}/".format(puerto)
+    if ya_levantado:
+        print("El documentator de {} ya estaba levantado en {}: se abre ese. El org se cambia desde la página.".format(raiz, url))
+        if not argumentos.sin_abrir:
+            webbrowser.open(url + argumentos.abrir.lstrip("/"))
+        return
     (raiz / "documentator").mkdir(exist_ok=True)
 
     # El indice solo se reescribe al documentar un objeto: sin esto, una pagina en
@@ -524,10 +575,10 @@ def main():
     Manejador.raiz = raiz
     Manejador.actualizaciones = Actualizaciones(raiz)
 
-    servidor = http.server.ThreadingHTTPServer(("127.0.0.1", argumentos.puerto), Manejador)
-    url = "http://127.0.0.1:{}/".format(argumentos.puerto)
+    servidor = http.server.ThreadingHTTPServer(("127.0.0.1", puerto), Manejador)
 
     print("  {}".format(url))
+    print("  Proyecto: {}".format(raiz))
     print("  Org por defecto: {}".format(org_por_defecto or "(ninguno)"))
     print("  Ctrl+C para parar.\n")
 

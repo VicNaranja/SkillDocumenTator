@@ -76,7 +76,7 @@ Claude arranca el servidor si no está levantado y abre la página en el navegad
 python <ruta-del-skill>/scripts/servir_documentator.py --org mi-sandbox
 ```
 
-y abrir `http://127.0.0.1:8788/`. Las páginas de objeto se pueden abrir también desde el disco, pero entonces el botón Actualizar no funciona y las páginas en vivo no cargan.
+y abre `http://127.0.0.1:8788/` en el navegador. Si ya hay un documentator del mismo proyecto levantado, abre ese en vez de arrancar otro; si el puerto lo ocupa el de otro proyecto, arranca en el siguiente libre y lo dice. Las páginas de objeto se pueden abrir también desde el disco, pero entonces el botón Actualizar no funciona y las páginas en vivo no cargan.
 
 | Opción | Por defecto | Para qué |
 |---|---|---|
